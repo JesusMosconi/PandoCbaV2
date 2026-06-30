@@ -1,0 +1,220 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Usuario {
+  id            Int          @id @default(autoincrement())
+  nombre        String
+  apellido      String
+  email         String       @unique
+  password      String
+  telefono      String?
+  fechaCreado   DateTime     @default(now())
+  rol           String       @default("cliente")
+
+  carrito       Carrito[]
+  favoritos     Favorito[]
+  suscripcion   Suscripcion?
+  ordenes       Orden[]
+}
+
+model Suscripcion {
+  id              Int      @id @default(autoincrement())
+  email           String    @unique
+  activo          Boolean  @default(true)
+  fechaSuscripcion DateTime @default(now())
+  usuario         Usuario?  @relation(fields: [usuarioId], references: [id])
+  usuarioId       Int?      @unique
+}
+
+model Categoria {
+  id       Int       @id @default(autoincrement())
+  nombre   String
+  productos Producto[]
+}
+
+model Coleccion {
+  id               Int       @id @default(autoincrement())
+  nombre           String
+  fechaLanzamiento DateTime?
+  contadorActivo   Boolean   @default(true)
+  fechaCreado      DateTime  @default(now())
+  productos        Producto[]
+}
+
+model Producto {
+  id           Int            @id @default(autoincrement())
+  nombre       String
+  descripcion  String?
+  precio       Decimal
+  activo       Boolean        @default(true)
+  CreatedAt    DateTime       @default(now())
+  UpdatedAt    DateTime       @updatedAt
+  web          Boolean        @default(true)
+  categoria    Categoria      @relation(fields: [categoriaId], references: [id])
+  categoriaId  Int
+  coleccion    Coleccion?     @relation(fields: [coleccionId], references: [id])
+  coleccionId  Int?
+  talles       TalleProducto[]
+  imagenes     ImgProducto[]
+  favoritos    Favorito[]
+  catalogos    CatalogoInicio[]
+}
+
+
+model Talle {
+  id     Int             @id @default(autoincrement())
+  valor  String
+  orden  Int?
+  tallesProducto TalleProducto[]
+}
+
+model Color {
+  id     Int             @id @default(autoincrement())
+  nombre String
+  hex    String
+  tallesProducto TalleProducto[]
+}
+
+model TalleProducto {
+  id         Int          @id @default(autoincrement())
+  stock      Int
+  estado     String
+  producto   Producto     @relation(fields: [productoId], references: [id])
+  productoId Int
+  talle      Talle        @relation(fields: [talleId], references: [id])
+  talleId    Int
+  color      Color        @relation(fields: [colorId], references: [id])
+  colorId    Int
+  itemsCarrito ItemCarrito[]
+  @@unique([productoId, talleId, colorId])
+}
+
+model ImgProducto {
+  id         Int      @id @default(autoincrement())
+  url        String @unique
+  orden      Int
+  producto   Producto @relation(fields: [productoId], references: [id])
+  productoId Int
+}
+
+model CatalogoInicio {
+  id         Int      @id @default(autoincrement())
+  orden      Int
+  producto   Producto @relation(fields: [productoId], references: [id])
+  productoId Int
+}
+
+model Carrito {
+  id          Int           @id @default(autoincrement())
+  estado      String        @default("activo")
+  actualizado DateTime      @updatedAt
+  canal       String
+  usuario     Usuario       @relation(fields: [usuarioId], references: [id])
+  usuarioId   Int
+  items       ItemCarrito[]
+  orden       Orden?
+  ventas      Venta[]
+}
+
+model ItemCarrito {
+  id               Int            @id @default(autoincrement())
+  cantidad         Int
+  precioUnitario   Decimal
+  talleProducto    TalleProducto? @relation(fields: [talleProductoId], references: [id])
+  talleProductoId  Int?
+  carrito          Carrito        @relation(fields: [carritoId], references: [id])
+  carritoId        Int
+  productoImprovisado ProductoImprovisado? @relation(fields: [productoImprovisadoId], references: [id])
+  productoImprovisadoId Int?
+}
+
+model ProductoImprovisado {
+  id        Int           @id @default(autoincrement())
+  nombre    String
+  talle     String?
+  categoria String?
+  color     String?
+  precio    Decimal
+  items     ItemCarrito[]
+}
+
+model Orden {
+  id           Int            @id @default(autoincrement())
+  tipoEntrega  String
+  estado       String         @default("pendiente")
+  subtotal     Decimal
+  costoEnvio   Decimal        @default(0)
+  total        Decimal
+  metodoPago   String
+  fechaCreado  DateTime       @default(now())
+  usuario      Usuario        @relation(fields: [usuarioId], references: [id])
+  usuarioId    Int
+  carrito      Carrito        @relation(fields: [carritoId], references: [id])
+  carritoId    Int            @unique
+  datosEnvio   DatosEnvio?
+  actividades  ActividadAdmin[]
+}
+
+model DatosEnvio {
+  id        Int    @id @default(autoincrement())
+  direccion String
+  ciudad    String
+  codPostal String?
+  telefono  String?
+  email     String?
+  orden     Orden  @relation(fields: [ordenId], references: [id])
+  ordenId   Int    @unique
+}
+
+model Venta {
+  id           Int      @id @default(autoincrement())
+  canal        String
+  idTransaccion String?
+  monto        Decimal
+  estado       String
+  clienteNombre String?
+  clienteMail  String?
+  fecha        DateTime @default(now())
+  carrito      Carrito  @relation(fields: [carritoId], references: [id])
+  carritoId    Int
+}
+
+model Favorito {
+  id         Int      @id @default(autoincrement())
+  fechaCreado DateTime @default(now())
+  producto   Producto @relation(fields: [productoId], references: [id])
+  productoId Int
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id])
+  usuarioId  Int
+  @@unique([productoId, usuarioId])
+}
+
+model ActividadAdmin {
+  id          Int      @id @default(autoincrement())
+  tipoEvento  String
+  fecha       DateTime @default(now())
+  orden       Orden    @relation(fields: [ordenId], references: [id])
+  ordenId     Int
+}
+
+model ContenidoInicio {
+  id             Int    @id @default(autoincrement())
+  seccionNombre  String
+  imagenUrl      String?
+  titulo         String?
+  textoPrincipal String?
+  textBoton      String?
+  alineacionTexto String?
+}
+
+
