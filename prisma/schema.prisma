@@ -45,7 +45,7 @@ model Categoria {
 model Coleccion {
   id               Int       @id @default(autoincrement())
   nombre           String
-  fechaLanzamiento DateTime?
+  fechaLanzamiento DateTime?  //sacar
   contadorActivo   Boolean   @default(true)
   fechaCreado      DateTime  @default(now())
   productos        Producto[]
