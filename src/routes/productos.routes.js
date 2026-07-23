@@ -1,85 +1,59 @@
-import  {Router} from 'express';
-import  prisma from "../db.js";
+import { Router } from "express";
+import prisma from "../db.js";
+import { asyncHandler } from "../utils/async-handler.js";
+import { validateBody } from "../utils/validate.js";
 
 const router = Router();
+const requiredFields = { nombre: "string", precio: "number", categoriaId: "number" };
+const optionalFields = { descripcion: "string", activo: "boolean", web: "boolean", coleccionId: "number" };
 
-// GET
-router.get('/productos', async (req, res) => {
-  const { categoriaId, web} = req.query;
-
+router.get("/productos", asyncHandler(async (req, res) => {
+  const { categoriaId, web } = req.query;
   const productos = await prisma.producto.findMany({
     where: {
       activo: true,
-      categoriaId: categoriaId ? parseInt(categoriaId) : undefined,
-      web: web === 'true' ? true : undefined
+      categoriaId: categoriaId ? Number(categoriaId) : undefined,
+      web: web === "true" ? true : undefined,
     },
     include: {
       categoria: true,
       coleccion: true,
-      imagenes: {orderBy: {id: 'asc'}, take: 1},
-      talles: {
-        where: {stock: {gt: 0}},
-        include: { talle:true, color:true }
-      }
-    }
-  })
-  res.json(productos)
-})
-
-//get por ID
-router.get('/productos/:id', async (req, res) => {
-  const productoPorId = await prisma.producto.findFirst({
-    where: {id: parseInt(req.params.id)},
-    include: {
-      categoria: true,
-      coleccion: true,
-      imagenes: {orderBy: {orden: 'asc'}},
-      talles: { include: { talle:true, color:true } }
-  }
-})
-
-  if (!productoPorId) {
-    return res.status(404).json({ message: "Producto no encontrado" });
-  }
-  res.json(productoPorId)
-})
-
-//post
-
-router.post('/productos', async (req, res) => {
-  const NuevoProducto = await prisma.producto.create({
-    data: req.body
-  })
-  res.json(NuevoProducto)
-})
-
-//put
-
-router.put('/productos/:id', async (req, res) => {
-  const EditarProducto = await prisma.producto.update({
-    where: {
-      id: parseInt(req.params.id)
+      imagenes: { orderBy: { id: "asc" }, take: 1 },
+      talles: { where: { stock: { gt: 0 } }, include: { talle: true, color: true } },
     },
-    data: req.body
   });
-  if (!EditarProducto) {
-    return res.status(404).json({ message: "Producto no encontrado" });
-  }
+  res.json(productos);
+}));
 
-  res.json(EditarProducto);
-});
+router.get("/productos/:id", asyncHandler(async (req, res) => {
+  const producto = await prisma.producto.findUnique({
+    where: { id: Number(req.params.id) },
+    include: {
+      categoria: true,
+      coleccion: true,
+      imagenes: { orderBy: { orden: "asc" } },
+      talles: { include: { talle: true, color: true } },
+    },
+  });
+  if (!producto) return res.status(404).json({ message: "Producto no encontrado" });
+  res.json(producto);
+}));
 
+router.post("/productos", asyncHandler(async (req, res) => {
+  const error = validateBody(req.body, requiredFields, optionalFields);
+  if (error) return res.status(400).json({ message: error });
+  res.json(await prisma.producto.create({ data: req.body }));
+}));
 
-//SOFT Delete
+router.put("/productos/:id", asyncHandler(async (req, res) => {
+  const error = validateBody(req.body, requiredFields, optionalFields);
+  if (error) return res.status(400).json({ message: error });
+  res.json(await prisma.producto.update({ where: { id: Number(req.params.id) }, data: req.body }));
+}));
 
-router.delete('/productos/:id', async (req, res) => {
-  //soft delete: cambiar el campo activo a false
-  await prisma.producto.update({
-    where: {
-      id: parseInt(req.params.id)},
-      data: { activo: false }
-  }); 
+router.delete("/productos/:id", asyncHandler(async (req, res) => {
+  await prisma.producto.update({ where: { id: Number(req.params.id) }, data: { activo: false } });
   res.json({ message: "Producto desactivado" });
-});
+}));
 
 export default router;

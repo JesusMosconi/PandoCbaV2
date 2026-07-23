@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import colorRoutes from "./routes/color.routes.js";
@@ -8,12 +8,12 @@ import coleccionRoutes from "./routes/colecciones.routes.js";
 import productosRoutes from "./routes/productos.routes.js";
 import talleProductoRoutes from "./routes/talle-producto.routes.js";
 import imgProductoRoutes from "./routes/img-producto.routes.js";
-
-
-
+import catalogoInicioRoutes from "./routes/catalogo-inicio.routes.js";
+import contenidoInicioRoutes from "./routes/contenido-inicio.routes.js";
+import suscripcionRoutes from "./routes/suscripcion.routes.js";
 
 const app = express();
-app.use(cors({origin: "http://localhost:3001"}));
+app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3001" }));
 app.use(express.json());
 app.use("/api", colorRoutes);
 app.use("/api", talleRoutes);
@@ -22,5 +22,14 @@ app.use("/api", coleccionRoutes);
 app.use("/api", productosRoutes);
 app.use("/api", talleProductoRoutes);
 app.use("/api", imgProductoRoutes);
+app.use("/api", catalogoInicioRoutes);
+app.use("/api", contenidoInicioRoutes);
+app.use("/api", suscripcionRoutes);
+
+app.use((error, req, res, next) => {
+  console.error(error);
+  res.status(500).json({ message: "Error interno del servidor" });
+});
+
 app.listen(3000);
 console.log("Server running on port", 3000);

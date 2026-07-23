@@ -1,39 +1,31 @@
-import  {Router} from 'express';
-import  prisma from "../db.js";
+import { Router } from "express";
+import prisma from "../db.js";
+import { asyncHandler } from "../utils/async-handler.js";
+import { validateBody } from "../utils/validate.js";
 
 const router = Router();
+const requiredFields = {
+  stock: "number",
+  estado: "string",
+  productoId: "number",
+  talleId: "number",
+  colorId: "number",
+};
 
-//GET
-router.get('/talle-producto', async (req, res) => {
-  const talleProducto = await prisma.talleProducto.findMany()
-  res.json(talleProducto)
-})
+router.get("/talle-producto", asyncHandler(async (req, res) => {
+  res.json(await prisma.talleProducto.findMany());
+}));
 
-//POST
+router.post("/talle-producto", asyncHandler(async (req, res) => {
+  const error = validateBody(req.body, requiredFields);
+  if (error) return res.status(400).json({ message: error });
+  res.json(await prisma.talleProducto.create({ data: req.body }));
+}));
 
-router.post('/talle-producto', async (req, res) => {
-  const talleProducto = await prisma.talleProducto.create({
-    data: req.body
-  });
-  res.json(talleProducto);
-});
+router.put("/talle-producto/:id", asyncHandler(async (req, res) => {
+  const error = validateBody(req.body, requiredFields);
+  if (error) return res.status(400).json({ message: error });
+  res.json(await prisma.talleProducto.update({ where: { id: Number(req.params.id) }, data: req.body }));
+}));
 
-//PUT
-
-router.put('/talle-producto/:id', async (req, res) => {
-    const EditarTalleProducto = await prisma.talleProducto.update({
-      where: {
-        id: parseInt(req.params.id)
-      },
-      data: req.body
-    });
-
-    if (!EditarTalleProducto) {
-      return res.status(404).json({ message: "TalleProducto no encontrado" });
-    }
-
-    res.json(EditarTalleProducto);
-  });
-
-
-  export default router;
+export default router;
