@@ -8,13 +8,20 @@ router.get("/colecciones", asyncHandler(async (req, res) => {
   res.json(await prisma.coleccion.findMany());
 }));
 
+router.get("/colecciones/:id", asyncHandler(async (req, res) => {
+  const coleccion = await prisma.coleccion.findUnique({ where: { id: Number(req.params.id) } });
+  if (!coleccion) return res.status(404).json({ message: "Colección no encontrada" });
+  res.json(coleccion);
+}));
+
 //POST
 
 router.post("/colecciones", asyncHandler(async (req, res) => {
-  const { nombre } = req.body;
+  const { nombre, imagenUrl } = req.body;
   const coleccion = await prisma.coleccion.create({
     data: {
       nombre,
+      imagenUrl,
     },
   });
   res.status(201).json(coleccion);
@@ -24,10 +31,10 @@ router.post("/colecciones", asyncHandler(async (req, res) => {
 
 router.put("/colecciones/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { nombre } = req.body;
+  const { nombre, imagenUrl } = req.body;
   const coleccion = await prisma.coleccion.update({
     where: { id: parseInt(id) },
-    data: { nombre },
+    data: { nombre, imagenUrl },
   });
   res.json(coleccion);
 }));

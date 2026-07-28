@@ -8,13 +8,18 @@ const requiredFields = { nombre: "string", precio: "number", categoriaId: "numbe
 const optionalFields = { descripcion: "string", activo: "boolean", web: "boolean", coleccionId: "number" };
 
 router.get("/productos", asyncHandler(async (req, res) => {
-  const { categoriaId, web } = req.query;
+  const { categoriaId, web, talle, orden, coleccionId } = req.query;
   const productos = await prisma.producto.findMany({
     where: {
       activo: true,
       categoriaId: categoriaId ? Number(categoriaId) : undefined,
+      coleccionId: coleccionId ? Number(coleccionId) : undefined,
       web: web === "true" ? true : undefined,
+      talles: talle
+        ? { some: { talle: { valor: talle }, stock: { gt: 0 } } }
+        : undefined,
     },
+    orderBy: orden === "asc" || orden === "desc" ? { precio: orden } : undefined,
     include: {
       categoria: true,
       coleccion: true,

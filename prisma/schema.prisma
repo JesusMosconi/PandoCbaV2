@@ -37,14 +37,16 @@ model Suscripcion {
 }
 
 model Categoria {
-  id       Int       @id @default(autoincrement())
-  nombre   String
+  id        Int       @id @default(autoincrement())
+  nombre    String
+  imagenUrl String?
   productos Producto[]
 }
 
 model Coleccion {
   id               Int       @id @default(autoincrement())
   nombre           String
+  imagenUrl        String?
   fechaLanzamiento DateTime?  //sacar
   contadorActivo   Boolean   @default(true)
   fechaCreado      DateTime  @default(now())

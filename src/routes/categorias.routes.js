@@ -8,13 +8,22 @@ router.get("/categorias", asyncHandler(async (req, res) => {
   res.json(await prisma.categoria.findMany());
 }));
 
+router.get("/categorias/:id", asyncHandler(async (req, res) => {
+  const categoria = await prisma.categoria.findUnique({
+    where: { id: Number(req.params.id) },
+  });
+  if (!categoria) return res.status(404).json({ message: "Categoría no encontrada" });
+  res.json(categoria);
+}));
+
 //Post
 
 router.post("/categorias", asyncHandler(async (req, res) => {
-  const { nombre } = req.body;
+  const { nombre, imagenUrl } = req.body;
   const categoria = await prisma.categoria.create({
     data: {
       nombre,
+      imagenUrl,
     },
   });
   res.status(201).json(categoria);
@@ -24,10 +33,10 @@ router.post("/categorias", asyncHandler(async (req, res) => {
 
 router.put("/categorias/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { nombre } = req.body;
+  const { nombre, imagenUrl } = req.body;
   const categoria = await prisma.categoria.update({
     where: { id: parseInt(id) },
-    data: { nombre },
+    data: { nombre, imagenUrl },
   });
   res.json(categoria);
 }));

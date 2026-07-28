@@ -1,0 +1,2 @@
+ALTER TABLE "Categoria" ADD COLUMN IF NOT EXISTS "imagenUrl" TEXT;
+ALTER TABLE "Coleccion" ADD COLUMN IF NOT EXISTS "imagenUrl" TEXT;
