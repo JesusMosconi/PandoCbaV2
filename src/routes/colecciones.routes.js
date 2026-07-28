@@ -17,11 +17,14 @@ router.get("/colecciones/:id", asyncHandler(async (req, res) => {
 //POST
 
 router.post("/colecciones", asyncHandler(async (req, res) => {
-  const { nombre, imagenUrl } = req.body;
+  const { nombre, imagenUrl, fechaLanzamiento, numeroDrop, contadorActivo } = req.body;
   const coleccion = await prisma.coleccion.create({
     data: {
       nombre,
       imagenUrl,
+      fechaLanzamiento,
+      numeroDrop,
+      contadorActivo,
     },
   });
   res.status(201).json(coleccion);
@@ -31,10 +34,10 @@ router.post("/colecciones", asyncHandler(async (req, res) => {
 
 router.put("/colecciones/:id", asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { nombre, imagenUrl } = req.body;
+  const { nombre, imagenUrl, fechaLanzamiento, numeroDrop, contadorActivo } = req.body;
   const coleccion = await prisma.coleccion.update({
     where: { id: parseInt(id) },
-    data: { nombre, imagenUrl },
+    data: { nombre, imagenUrl, fechaLanzamiento, numeroDrop, contadorActivo },
   });
   res.json(coleccion);
 }));

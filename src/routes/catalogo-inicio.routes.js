@@ -12,9 +12,15 @@ router.get("/catalogo-inicio", asyncHandler(async (req, res) => {
     include: {
       producto: {
         select: {
+          id: true,
           nombre: true,
           precio: true,
+          descripcion: true,
           imagenes: { orderBy: { orden: "asc" }, take: 1 },
+          talles: {
+            where: { stock: { gt: 0 } },
+            select: { talle: { select: { valor: true } } },
+          },
         },
       },
     },
@@ -25,7 +31,21 @@ router.get("/catalogo-inicio", asyncHandler(async (req, res) => {
 router.get("/catalogo-inicio/:id", asyncHandler(async (req, res) => {
   const item = await prisma.catalogoInicio.findUnique({
     where: { id: Number(req.params.id) },
-    include: { producto: { select: { nombre: true, precio: true, imagenes: { orderBy: { orden: "asc" }, take: 1 } } } },
+    include: {
+      producto: {
+        select: {
+          id: true,
+          nombre: true,
+          precio: true,
+          descripcion: true,
+          imagenes: { orderBy: { orden: "asc" }, take: 1 },
+          talles: {
+            where: { stock: { gt: 0 } },
+            select: { talle: { select: { valor: true } } },
+          },
+        },
+      },
+    },
   });
   if (!item) return res.status(404).json({ message: "Elemento de catálogo no encontrado" });
   res.json(item);

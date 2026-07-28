@@ -47,7 +47,8 @@ model Coleccion {
   id               Int       @id @default(autoincrement())
   nombre           String
   imagenUrl        String?
-  fechaLanzamiento DateTime?  //sacar
+  fechaLanzamiento DateTime?
+  numeroDrop       Int?
   contadorActivo   Boolean   @default(true)
   fechaCreado      DateTime  @default(now())
   productos        Producto[]
