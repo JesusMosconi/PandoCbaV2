@@ -220,4 +220,12 @@ model ContenidoInicio {
   alineacionTexto String?
 }
 
+model ImagenNosotros {
+  id        Int     @id @default(autoincrement())
+  clave     String  @unique
+  nombre    String
+  orden     Int
+  imagenUrl String?
+}
+
 

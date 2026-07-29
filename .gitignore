@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Imágenes subidas por multer (no versionar el contenido)
+/public/uploads/*
+!/public/uploads/.gitkeep
