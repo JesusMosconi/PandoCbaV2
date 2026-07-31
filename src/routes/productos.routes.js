@@ -8,10 +8,11 @@ const requiredFields = { nombre: "string", precio: "number", categoriaId: "numbe
 const optionalFields = { descripcion: "string", activo: "boolean", web: "boolean", coleccionId: "number" };
 
 router.get("/productos", asyncHandler(async (req, res) => {
-  const { categoriaId, web, talle, orden, coleccionId } = req.query;
+  const { categoriaId, web, talle, orden, coleccionId, admin } = req.query;
+  const esAdmin = admin === "true";
   const productos = await prisma.producto.findMany({
     where: {
-      activo: true,
+      activo: esAdmin ? undefined : true,
       categoriaId: categoriaId ? Number(categoriaId) : undefined,
       coleccionId: coleccionId ? Number(coleccionId) : undefined,
       web: web === "true" ? true : undefined,
@@ -24,7 +25,10 @@ router.get("/productos", asyncHandler(async (req, res) => {
       categoria: true,
       coleccion: true,
       imagenes: { orderBy: { id: "asc" }, take: 1 },
-      talles: { where: { stock: { gt: 0 } }, include: { talle: true, color: true } },
+      talles: {
+        where: esAdmin ? undefined : { stock: { gt: 0 } },
+        include: { talle: true, color: true },
+      },
     },
   });
   res.json(productos);
