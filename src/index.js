@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import { uploadsDir } from "./utils/upload.js";
 import colorRoutes from "./routes/color.routes.js";
 import talleRoutes from "./routes/talle.routes.js";
 import categoriaRoutes from "./routes/categorias.routes.js";
@@ -18,7 +17,6 @@ import suscripcionRoutes from "./routes/suscripcion.routes.js";
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3001" }));
 app.use(express.json());
-app.use("/uploads", express.static(uploadsDir));
 app.use("/api", colorRoutes);
 app.use("/api", talleRoutes);
 app.use("/api", categoriaRoutes);
@@ -39,5 +37,6 @@ app.use((error, req, res, next) => {
   res.status(500).json({ message: "Error interno del servidor" });
 });
 
-app.listen(3000);
-console.log("Server running on port", 3000);
+const port = process.env.PORT || 3000;
+app.listen(port);
+console.log("Server running on port", port);

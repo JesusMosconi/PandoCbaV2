@@ -1,23 +1,20 @@
 import multer from "multer";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import { v2 as cloudinary } from "cloudinary";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const uploadsDir = path.join(__dirname, "..", "..", "public", "uploads");
-
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const allowedMimes = ["image/jpeg", "image/png", "image/webp", "image/avif"];
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${unique}${ext}`);
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "pandocba",
+    allowed_formats: ["jpg", "jpeg", "png", "webp", "avif"],
   },
 });
 
@@ -31,3 +28,5 @@ export const upload = multer({
     cb(null, true);
   },
 });
+
+export { cloudinary };

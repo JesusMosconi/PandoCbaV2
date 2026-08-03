@@ -21,12 +21,12 @@ router.post("/colecciones/:id/imagen", upload.single("imagen"), asyncHandler(asy
   const coleccion = await prisma.coleccion.findUnique({ where: { id } });
 
   if (!coleccion) {
-    if (req.file) await eliminarImagenLocal(`/uploads/${req.file.filename}`);
+    if (req.file) await eliminarImagenLocal(req.file.path);
     return res.status(404).json({ message: "Colección no encontrada" });
   }
   if (!req.file) return res.status(400).json({ message: "No se recibió ninguna imagen" });
 
-  const imagenUrl = crearUrlImagen(req, req.file.filename);
+  const imagenUrl = crearUrlImagen(req, req.file);
 
   try {
     const actualizada = await prisma.coleccion.update({

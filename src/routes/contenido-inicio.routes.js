@@ -30,12 +30,12 @@ router.post("/contenido-inicio/:id/imagen", upload.single("imagen"), asyncHandle
   const contenido = await prisma.contenidoInicio.findUnique({ where: { id } });
 
   if (!contenido) {
-    if (req.file) await eliminarImagenLocal(`/uploads/${req.file.filename}`);
+    if (req.file) await eliminarImagenLocal(req.file.path);
     return res.status(404).json({ message: "Contenido de inicio no encontrado" });
   }
   if (!req.file) return res.status(400).json({ message: "No se recibió ninguna imagen" });
 
-  const imagenUrl = crearUrlImagen(req, req.file.filename);
+  const imagenUrl = crearUrlImagen(req, req.file);
 
   try {
     const actualizado = await prisma.contenidoInicio.update({

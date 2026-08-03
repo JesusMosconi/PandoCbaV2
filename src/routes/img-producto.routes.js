@@ -20,13 +20,11 @@ router.post("/img-producto/upload", upload.array("imagenes", 10), asyncHandler(a
   });
   let orden = (ultimo?.orden ?? 0) + 1;
 
-  const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get("host")}`;
-
   const creadas = [];
   for (const file of req.files) {
     creadas.push(
       await prisma.imgProducto.create({
-        data: { url: `${baseUrl}/uploads/${file.filename}`, orden: orden++, productoId },
+        data: { url: file.path, orden: orden++, productoId },
       })
     );
   }
