@@ -2,10 +2,13 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 
-router.get("/suscripciones", asyncHandler(async (req, res) => {
+router.get("/suscripciones", ...requerirAdmin, asyncHandler(async (req, res) => {
   res.json(await prisma.suscripcion.findMany());
 }));
 
@@ -19,7 +22,7 @@ router.post("/suscripciones", asyncHandler(async (req, res) => {
   res.json(await prisma.suscripcion.create({ data: { email: req.body.email } }));
 }));
 
-router.delete("/suscripciones/:id", asyncHandler(async (req, res) => {
+router.delete("/suscripciones/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const suscripcion = await prisma.suscripcion.update({
     where: { id: Number(req.params.id) },
     data: { activo: false },

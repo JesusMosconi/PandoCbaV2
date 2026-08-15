@@ -3,10 +3,13 @@ import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { upload } from "../utils/upload.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 
-router.post("/img-producto/upload", upload.array("imagenes", 10), asyncHandler(async (req, res) => {
+router.post("/img-producto/upload", ...requerirAdmin, upload.array("imagenes", 10), asyncHandler(async (req, res) => {
   const productoId = Number(req.body.productoId);
   if (!productoId) return res.status(400).json({ message: "El campo \"productoId\" es obligatorio" });
   if (!req.files?.length) return res.status(400).json({ message: "No se recibió ninguna imagen" });
@@ -40,13 +43,13 @@ router.get("/img-producto/:productoId", asyncHandler(async (req, res) => {
   res.json(imagenes);
 }));
 
-router.post("/img-producto", asyncHandler(async (req, res) => {
+router.post("/img-producto", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, { url: "string", orden: "number", productoId: "number" });
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.imgProducto.create({ data: req.body }));
 }));
 
-router.put("/img-producto/:id", asyncHandler(async (req, res) => {
+router.put("/img-producto/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, { url: "string", orden: "number" });
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.imgProducto.update({
@@ -55,7 +58,7 @@ router.put("/img-producto/:id", asyncHandler(async (req, res) => {
   }));
 }));
 
-router.delete("/img-producto/:id", asyncHandler(async (req, res) => {
+router.delete("/img-producto/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   await prisma.imgProducto.delete({ where: { id: Number(req.params.id) } });
   res.json({ message: "ImgProducto eliminado" });
 }));

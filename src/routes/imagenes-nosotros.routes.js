@@ -3,14 +3,17 @@ import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { upload } from "../utils/upload.js";
 import { crearUrlImagen, eliminarImagenLocal } from "../utils/imagen-local.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 
 router.get("/imagenes-nosotros", asyncHandler(async (req, res) => {
   res.json(await prisma.imagenNosotros.findMany({ orderBy: { orden: "asc" } }));
 }));
 
-router.post("/imagenes-nosotros/:id/imagen", upload.single("imagen"), asyncHandler(async (req, res) => {
+router.post("/imagenes-nosotros/:id/imagen", ...requerirAdmin, upload.single("imagen"), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const imagen = await prisma.imagenNosotros.findUnique({ where: { id } });
 
@@ -35,7 +38,7 @@ router.post("/imagenes-nosotros/:id/imagen", upload.single("imagen"), asyncHandl
   }
 }));
 
-router.delete("/imagenes-nosotros/:id/imagen", asyncHandler(async (req, res) => {
+router.delete("/imagenes-nosotros/:id/imagen", ...requerirAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const imagen = await prisma.imagenNosotros.findUnique({ where: { id } });
   if (!imagen) return res.status(404).json({ message: "Imagen de Nosotros no encontrada" });

@@ -4,8 +4,11 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { upload } from "../utils/upload.js";
 import { crearUrlImagen, eliminarImagenLocal } from "../utils/imagen-local.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 const requiredFields = { seccionNombre: "string" };
 const optionalFields = {
   imagenUrl: "string",
@@ -25,7 +28,7 @@ router.get("/contenido-inicio/:id", asyncHandler(async (req, res) => {
   res.json(contenido);
 }));
 
-router.post("/contenido-inicio/:id/imagen", upload.single("imagen"), asyncHandler(async (req, res) => {
+router.post("/contenido-inicio/:id/imagen", ...requerirAdmin, upload.single("imagen"), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const contenido = await prisma.contenidoInicio.findUnique({ where: { id } });
 
@@ -50,7 +53,7 @@ router.post("/contenido-inicio/:id/imagen", upload.single("imagen"), asyncHandle
   }
 }));
 
-router.delete("/contenido-inicio/:id/imagen", asyncHandler(async (req, res) => {
+router.delete("/contenido-inicio/:id/imagen", ...requerirAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const contenido = await prisma.contenidoInicio.findUnique({ where: { id } });
   if (!contenido) return res.status(404).json({ message: "Contenido de inicio no encontrado" });
@@ -63,19 +66,19 @@ router.delete("/contenido-inicio/:id/imagen", asyncHandler(async (req, res) => {
   res.json(actualizado);
 }));
 
-router.post("/contenido-inicio", asyncHandler(async (req, res) => {
+router.post("/contenido-inicio", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.contenidoInicio.create({ data: req.body }));
 }));
 
-router.put("/contenido-inicio/:id", asyncHandler(async (req, res) => {
+router.put("/contenido-inicio/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.contenidoInicio.update({ where: { id: Number(req.params.id) }, data: req.body }));
 }));
 
-router.delete("/contenido-inicio/:id", asyncHandler(async (req, res) => {
+router.delete("/contenido-inicio/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   res.json(await prisma.contenidoInicio.delete({ where: { id: Number(req.params.id) } }));
 }));
 

@@ -3,8 +3,11 @@ import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { upload } from "../utils/upload.js";
 import { crearUrlImagen, eliminarImagenLocal } from "../utils/imagen-local.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 
 router.get("/colecciones", asyncHandler(async (req, res) => {
   res.json(await prisma.coleccion.findMany());
@@ -16,7 +19,7 @@ router.get("/colecciones/:id", asyncHandler(async (req, res) => {
   res.json(coleccion);
 }));
 
-router.post("/colecciones/:id/imagen", upload.single("imagen"), asyncHandler(async (req, res) => {
+router.post("/colecciones/:id/imagen", ...requerirAdmin, upload.single("imagen"), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const coleccion = await prisma.coleccion.findUnique({ where: { id } });
 
@@ -41,7 +44,7 @@ router.post("/colecciones/:id/imagen", upload.single("imagen"), asyncHandler(asy
   }
 }));
 
-router.delete("/colecciones/:id/imagen", asyncHandler(async (req, res) => {
+router.delete("/colecciones/:id/imagen", ...requerirAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const coleccion = await prisma.coleccion.findUnique({ where: { id } });
   if (!coleccion) return res.status(404).json({ message: "Colección no encontrada" });
@@ -56,7 +59,7 @@ router.delete("/colecciones/:id/imagen", asyncHandler(async (req, res) => {
 
 //POST
 
-router.post("/colecciones", asyncHandler(async (req, res) => {
+router.post("/colecciones", ...requerirAdmin, asyncHandler(async (req, res) => {
   const { nombre, imagenUrl, fechaLanzamiento, numeroDrop, contadorActivo } = req.body;
   const coleccion = await prisma.coleccion.create({
     data: {
@@ -72,7 +75,7 @@ router.post("/colecciones", asyncHandler(async (req, res) => {
 
 //PUT
 
-router.put("/colecciones/:id", asyncHandler(async (req, res) => {
+router.put("/colecciones/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { nombre, imagenUrl, fechaLanzamiento, numeroDrop, contadorActivo } = req.body;
   const coleccion = await prisma.coleccion.update({
@@ -84,7 +87,7 @@ router.put("/colecciones/:id", asyncHandler(async (req, res) => {
 
 //DELETE
 
-router.delete("/colecciones/:id", asyncHandler(async (req, res) => {
+router.delete("/colecciones/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
   await prisma.coleccion.delete({
     where: { id: parseInt(id) },
