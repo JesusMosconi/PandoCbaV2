@@ -2,8 +2,11 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 const requiredFields = { valor: "string" };
 const optionalFields = { orden: "number" };
 
@@ -17,14 +20,14 @@ router.get("/talles/:id", asyncHandler(async (req, res) => {
   res.json(talle);
 }));
 
-router.post("/talles", asyncHandler(async (req, res) => {
+router.post("/talles", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   const talle = await prisma.talle.create({ data: req.body });
   res.json({ message: "Talle creado", talle });
 }));
 
-router.delete("/talles/:id", asyncHandler(async (req, res, next) => {
+router.delete("/talles/:id", ...requerirAdmin, asyncHandler(async (req, res, next) => {
   try {
     const talle = await prisma.talle.delete({ where: { id: Number(req.params.id) } });
     res.json(talle);
@@ -36,7 +39,7 @@ router.delete("/talles/:id", asyncHandler(async (req, res, next) => {
   }
 }));
 
-router.put("/talles/:id", asyncHandler(async (req, res) => {
+router.put("/talles/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.talle.update({ where: { id: Number(req.params.id) }, data: req.body }));

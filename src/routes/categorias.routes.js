@@ -3,8 +3,11 @@ import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { upload } from "../utils/upload.js";
 import { crearUrlImagen, eliminarImagenLocal } from "../utils/imagen-local.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 
 router.get("/categorias", asyncHandler(async (req, res) => {
   res.json(await prisma.categoria.findMany());
@@ -18,7 +21,7 @@ router.get("/categorias/:id", asyncHandler(async (req, res) => {
   res.json(categoria);
 }));
 
-router.post("/categorias/:id/imagen", upload.single("imagen"), asyncHandler(async (req, res) => {
+router.post("/categorias/:id/imagen", ...requerirAdmin, upload.single("imagen"), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const categoria = await prisma.categoria.findUnique({ where: { id } });
 
@@ -43,7 +46,7 @@ router.post("/categorias/:id/imagen", upload.single("imagen"), asyncHandler(asyn
   }
 }));
 
-router.delete("/categorias/:id/imagen", asyncHandler(async (req, res) => {
+router.delete("/categorias/:id/imagen", ...requerirAdmin, asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const categoria = await prisma.categoria.findUnique({ where: { id } });
   if (!categoria) return res.status(404).json({ message: "Categoría no encontrada" });
@@ -58,7 +61,7 @@ router.delete("/categorias/:id/imagen", asyncHandler(async (req, res) => {
 
 //Post
 
-router.post("/categorias", asyncHandler(async (req, res) => {
+router.post("/categorias", ...requerirAdmin, asyncHandler(async (req, res) => {
   const { nombre, imagenUrl } = req.body;
   const categoria = await prisma.categoria.create({
     data: {
@@ -71,7 +74,7 @@ router.post("/categorias", asyncHandler(async (req, res) => {
 
 //PUT
 
-router.put("/categorias/:id", asyncHandler(async (req, res) => {
+router.put("/categorias/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { nombre, imagenUrl } = req.body;
   const categoria = await prisma.categoria.update({
@@ -83,7 +86,7 @@ router.put("/categorias/:id", asyncHandler(async (req, res) => {
 
 //DELETE
 
-router.delete("/categorias/:id", asyncHandler(async (req, res) => {
+router.delete("/categorias/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
   await prisma.categoria.delete({
     where: { id: parseInt(id) },

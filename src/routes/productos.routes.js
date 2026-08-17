@@ -2,12 +2,18 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 const requiredFields = { nombre: "string", precio: "number", categoriaId: "number" };
 const optionalFields = { descripcion: "string", activo: "boolean", web: "boolean", coleccionId: "number" };
 
-router.get("/productos", asyncHandler(async (req, res) => {
+router.get("/productos", (req, res, next) => {
+  if (req.query.admin !== "true") return next();
+  return verificarToken(req, res, () => esAdmin(req, res, next));
+}, asyncHandler(async (req, res) => {
   const { categoriaId, web, talle, orden, coleccionId, admin } = req.query;
   const esAdmin = admin === "true";
   const productos = await prisma.producto.findMany({
@@ -48,19 +54,19 @@ router.get("/productos/:id", asyncHandler(async (req, res) => {
   res.json(producto);
 }));
 
-router.post("/productos", asyncHandler(async (req, res) => {
+router.post("/productos", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.producto.create({ data: req.body }));
 }));
 
-router.put("/productos/:id", asyncHandler(async (req, res) => {
+router.put("/productos/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.producto.update({ where: { id: Number(req.params.id) }, data: req.body }));
 }));
 
-router.delete("/productos/:id", asyncHandler(async (req, res) => {
+router.delete("/productos/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   await prisma.producto.update({ where: { id: Number(req.params.id) }, data: { activo: false } });
   res.json({ message: "Producto desactivado" });
 }));

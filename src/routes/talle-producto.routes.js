@@ -2,8 +2,11 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
+import { verificarToken } from "../middleware/auth.js";
+import { esAdmin } from "../middleware/es-admin.js";
 
 const router = Router();
+const requerirAdmin = [verificarToken, esAdmin];
 const requiredFields = {
   stock: "number",
   estado: "string",
@@ -21,7 +24,7 @@ router.get("/talle-producto", asyncHandler(async (req, res) => {
   }));
 }));
 
-router.post("/talle-producto", asyncHandler(async (req, res) => {
+router.post("/talle-producto", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.talleProducto.create({
@@ -30,7 +33,7 @@ router.post("/talle-producto", asyncHandler(async (req, res) => {
   }));
 }));
 
-router.put("/talle-producto/:id", asyncHandler(async (req, res) => {
+router.put("/talle-producto/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields);
   if (error) return res.status(400).json({ message: error });
   res.json(await prisma.talleProducto.update({
@@ -41,7 +44,7 @@ router.put("/talle-producto/:id", asyncHandler(async (req, res) => {
 }));
 
 // Se desactiva la variante en lugar de borrarla porque puede estar referenciada por ItemCarrito.
-router.delete("/talle-producto/:id", asyncHandler(async (req, res) => {
+router.delete("/talle-producto/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   res.json(await prisma.talleProducto.update({
     where: { id: Number(req.params.id) },
     data: { stock: 0, estado: "inactivo" },
