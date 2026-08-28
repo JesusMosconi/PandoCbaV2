@@ -20,6 +20,7 @@ model Usuario {
   telefono      String?
   fechaCreado   DateTime     @default(now())
   rol           String       @default("cliente")
+  activo        Boolean      @default(true)
 
   carrito       Carrito[]
   favoritos     Favorito[]
