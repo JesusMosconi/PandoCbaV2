@@ -12,6 +12,8 @@ const sanitizarUsuario = (usuario) => {
   return resto;
 };
 
+const rolesValidos = ["cliente", "admin"];
+
 const generarToken = (usuario) =>
   jwt.sign(
     { id: usuario.id, rol: usuario.rol, email: usuario.email },
@@ -49,7 +51,7 @@ router.post("/usuarios/login", async (req, res) => {
       return res.status(400).json({ message: "email y password son requeridos" });
     }
     const usuario = await prisma.usuario.findUnique({ where: { email } });
-    if (!usuario || !(await bcrypt.compare(password, usuario.password))) {
+    if (!usuario || !usuario.activo || !(await bcrypt.compare(password, usuario.password))) {
       return res.status(401).json({ message: "Credenciales inválidas" });
     }
     return res.json({ usuario: sanitizarUsuario(usuario), token: generarToken(usuario) });
@@ -110,11 +112,71 @@ router.put("/usuarios/cambiar-password", verificarToken, async (req, res) => {
 
 router.get("/admin/usuarios", verificarToken, esAdmin, async (req, res) => {
   try {
-    const usuarios = await prisma.usuario.findMany({ orderBy: { id: "asc" } });
-    return res.json(usuarios.map(sanitizarUsuario));
+    const pagina = Math.max(Number(req.query.pagina) || 1, 1);
+    const limite = Math.min(Math.max(Number(req.query.limite) || 20, 1), 100);
+    const busqueda = String(req.query.busqueda || "").trim();
+    const rol = req.query.rol ? String(req.query.rol) : undefined;
+    const activo = req.query.activo === undefined ? undefined : req.query.activo === "true";
+    const camposOrdenables = { id: "id", nombre: "nombre", email: "email", fechaCreado: "fechaCreado", rol: "rol" };
+    const orden = camposOrdenables[String(req.query.orden)] || "fechaCreado";
+    const direccion = req.query.direccion === "asc" ? "asc" : "desc";
+
+    if (rol && !rolesValidos.includes(rol)) return res.status(400).json({ message: "Rol inválido" });
+
+    const where = {
+      ...(busqueda ? { OR: [
+        { nombre: { contains: busqueda, mode: "insensitive" } },
+        { apellido: { contains: busqueda, mode: "insensitive" } },
+        { email: { contains: busqueda, mode: "insensitive" } },
+      ] } : {}),
+      ...(rol ? { rol } : {}),
+      ...(activo !== undefined ? { activo } : {}),
+    };
+    const [usuarios, total] = await prisma.$transaction([
+      prisma.usuario.findMany({
+        where,
+        select: { id: true, nombre: true, apellido: true, email: true, telefono: true, fechaCreado: true, rol: true, activo: true, _count: { select: { ordenes: true } } },
+        orderBy: { [orden]: direccion },
+        skip: (pagina - 1) * limite,
+        take: limite,
+      }),
+      prisma.usuario.count({ where }),
+    ]);
+    return res.json({ usuarios, total, pagina, limite, paginas: Math.ceil(total / limite) });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Error al obtener usuarios" });
+  }
+});
+
+router.get("/admin/usuarios/:id", verificarToken, esAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Id de usuario inválido" });
+    const usuario = await prisma.usuario.findUnique({
+      where: { id },
+      select: { id: true, nombre: true, apellido: true, email: true, telefono: true, fechaCreado: true, rol: true, activo: true, _count: { select: { ordenes: true, favoritos: true } } },
+    });
+    if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
+    return res.json(usuario);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Error al obtener usuario" });
+  }
+});
+
+router.patch("/admin/usuarios/:id/estado", verificarToken, esAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Id de usuario inválido" });
+    if (typeof req.body.activo !== "boolean") return res.status(400).json({ message: "El estado debe ser booleano" });
+    if (id === req.usuario.id && !req.body.activo) return res.status(400).json({ message: "No podés desactivar tu propio usuario" });
+    const usuario = await prisma.usuario.update({ where: { id }, data: { activo: req.body.activo }, select: { id: true, nombre: true, apellido: true, email: true, telefono: true, fechaCreado: true, rol: true, activo: true } });
+    return res.json(usuario);
+  } catch (error) {
+    if (error.code === "P2025") return res.status(404).json({ message: "Usuario no encontrado" });
+    console.error(error);
+    return res.status(500).json({ message: "Error al actualizar estado" });
   }
 });
 
@@ -123,7 +185,8 @@ router.put("/admin/usuarios/:id/rol", verificarToken, esAdmin, async (req, res) 
     const id = Number(req.params.id);
     const { rol } = req.body;
     if (!Number.isInteger(id)) return res.status(400).json({ message: "Id de usuario inválido" });
-    if (!['cliente', 'admin'].includes(rol)) return res.status(400).json({ message: "Rol inválido" });
+    if (!rolesValidos.includes(rol)) return res.status(400).json({ message: "Rol inválido" });
+    if (id === req.usuario.id && rol !== "admin") return res.status(400).json({ message: "No podés quitarte el rol administrador" });
     const usuario = await prisma.usuario.update({ where: { id }, data: { rol } });
     return res.json(sanitizarUsuario(usuario));
   } catch (error) {
