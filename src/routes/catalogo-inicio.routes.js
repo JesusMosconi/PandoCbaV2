@@ -4,6 +4,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
+import { whereProductoVisible } from "../utils/visibilidad-producto.js";
 
 const router = Router();
 const requerirAdmin = [verificarToken, esAdmin];
@@ -11,6 +12,7 @@ const requiredFields = { orden: "number", productoId: "number" };
 
 router.get("/catalogo-inicio", asyncHandler(async (req, res) => {
   const catalogo = await prisma.catalogoInicio.findMany({
+    where: { producto: { is: whereProductoVisible } },
     orderBy: { orden: "asc" },
     include: {
       producto: {
@@ -32,8 +34,8 @@ router.get("/catalogo-inicio", asyncHandler(async (req, res) => {
 }));
 
 router.get("/catalogo-inicio/:id", asyncHandler(async (req, res) => {
-  const item = await prisma.catalogoInicio.findUnique({
-    where: { id: Number(req.params.id) },
+  const item = await prisma.catalogoInicio.findFirst({
+    where: { id: Number(req.params.id), producto: { is: whereProductoVisible } },
     include: {
       producto: {
         select: {
