@@ -4,6 +4,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
+import { whereProductoVisible } from "../utils/visibilidad-producto.js";
 
 const router = Router();
 const requerirAdmin = [verificarToken, esAdmin];
@@ -18,10 +19,10 @@ router.get("/productos", (req, res, next) => {
   const esAdmin = admin === "true";
   const productos = await prisma.producto.findMany({
     where: {
-      activo: esAdmin ? undefined : true,
+      ...(esAdmin ? {} : whereProductoVisible),
       categoriaId: categoriaId ? Number(categoriaId) : undefined,
       coleccionId: coleccionId ? Number(coleccionId) : undefined,
-      web: web === "true" ? true : undefined,
+      ...(esAdmin && web === "true" ? { web: true } : {}),
       talles: talle
         ? { some: { talle: { valor: talle }, stock: { gt: 0 } } }
         : undefined,
@@ -41,13 +42,13 @@ router.get("/productos", (req, res, next) => {
 }));
 
 router.get("/productos/:id", asyncHandler(async (req, res) => {
-  const producto = await prisma.producto.findUnique({
-    where: { id: Number(req.params.id) },
+  const producto = await prisma.producto.findFirst({
+    where: { id: Number(req.params.id), ...whereProductoVisible },
     include: {
       categoria: true,
       coleccion: true,
       imagenes: { orderBy: { orden: "asc" } },
-      talles: { include: { talle: true, color: true } },
+      talles: { where: { stock: { gt: 0 } }, include: { talle: true, color: true } },
     },
   });
   if (!producto) return res.status(404).json({ message: "Producto no encontrado" });
