@@ -29,10 +29,7 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - name: Instalar dependencias
-        run: npm ci
-
-      - name: Validar base aislada y vencer órdenes
+      - name: Validar destino aislado
         env:
           DATABASE_URL: ${{ secrets.PRUEBA_DATABASE_URL }}
         run: |
@@ -44,4 +41,13 @@ jobs:
               throw new Error("La conexión no corresponde a la base aislada Prueba");
             }
           '
-          npm run vencer-ordenes
+
+      - name: Instalar dependencias
+        env:
+          DATABASE_URL: ${{ secrets.PRUEBA_DATABASE_URL }}
+        run: npm ci
+
+      - name: Vencer órdenes
+        env:
+          DATABASE_URL: ${{ secrets.PRUEBA_DATABASE_URL }}
+        run: npm run vencer-ordenes
