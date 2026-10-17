@@ -126,7 +126,7 @@ export async function confirmarCheckout(usuarioId, entrada) {
         }
 
         const creadaEn = await horaBaseDatos(tx);
-        const venceEn = new Date(creadaEn.getTime() + 120 * 60 * 60 * 1000);
+        const venceEn = new Date(creadaEn.getTime() + 24 * 60 * 60 * 1000);
         const subtotal = decimal(resumen.subtotalProductos);
         const entrega = resumen.entrega;
         const orden = await tx.orden.create({
