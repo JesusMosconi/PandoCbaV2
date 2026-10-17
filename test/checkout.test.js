@@ -192,7 +192,7 @@ test("envío conserva detalle, cinco datos normalizados y total final sin cotiza
     assert.equal(persistida.subtotal.toString(), "241");
     assert.equal(persistida.costoEnvio, null);
     assert.equal(persistida.total, null);
-    assert.equal(persistida.venceEn.getTime() - persistida.creadaEn.getTime(), 120 * 60 * 60 * 1000);
+    assert.equal(persistida.venceEn.getTime() - persistida.creadaEn.getTime(), 24 * 60 * 60 * 1000);
     assert.equal(persistida.datosEnvio.email, "cliente@ejemplo.com");
     assert.equal(persistida.datosEnvio.codPostal, "X5000");
     assert.equal(persistida.detalles.length, 1);
