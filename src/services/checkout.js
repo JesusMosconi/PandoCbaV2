@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { bloquearVariantes, disponibilidadVariantes, horaBaseDatos } from "./inventario.js";
+import { ErrorPartidas, seleccionarPartidasFIFO } from "./partidas.js";
 
 const incluirCarrito = {
   items: {
@@ -107,6 +108,16 @@ export async function confirmarCheckout(usuarioId, entrada) {
             "Este carrito ya se convirtió en otra orden");
         }
 
+        await tx.$executeRaw`INSERT INTO "EstadoCorteInventario" ("id", "actualizadoEn")
+          VALUES (1, clock_timestamp()) ON CONFLICT ("id") DO NOTHING`;
+        await tx.$queryRaw`SELECT "id" FROM "EstadoCorteInventario" WHERE "id" = 1 FOR SHARE`;
+        const corte = await tx.estadoCorteInventario.findUnique({
+          where: { id: 1 }, select: { id: true, estado: true, suspendido: true },
+        });
+        if (corte?.suspendido) {
+          throw new ErrorConfirmacionCheckout(409, "INVENTARIO_SUSPENDIDO",
+            "El inventario está suspendido durante el corte");
+        }
         await bloquearVariantes(tx, carrito.items.map((item) => item.talleProductoId).filter(Boolean));
         const carritoActual = await obtenerCarritoCheckout(tx, usuarioId);
         if (!carritoActual || carritoActual.id !== carrito.id) {
@@ -124,6 +135,43 @@ export async function confirmarCheckout(usuarioId, entrada) {
           throw new ErrorConfirmacionCheckout(409, "RESUMEN_CAMBIO",
             "El precio o el carrito cambiaron; revisá y aceptá el resumen vigente", { resumen });
         }
+
+        // Hasta activar el corte, las variantes heredadas conservan íntegro el
+        // checkout previo. Una reserva histórica sin asignación también impide
+        // activar FIFO parcialmente sobre una variante nueva.
+        const variantesPorId = new Map(carritoActual.items.map((item) => [
+          item.talleProductoId, item.talleProducto,
+        ]).filter(([id, variante]) => id && variante));
+        const idsVariantes = [...variantesPorId.keys()];
+        const estados = corte?.estado === "activo" ? await tx.estadoCorteVariante.findMany({
+          where: { corteId: corte.id, varianteId: { in: idsVariantes } },
+          select: { varianteId: true, estado: true },
+        }) : [];
+        const incorporadas = new Set(estados.filter((estado) => estado.estado === "conciliado")
+          .map((estado) => estado.varianteId));
+        if (corte?.estado === "activo" && idsVariantes.some((id) => !incorporadas.has(id))) {
+          throw new ErrorConfirmacionCheckout(409, "VARIANTE_SIN_CORTE",
+            "Una variante todavía no está conciliada con el inventario");
+        }
+        const candidatasFIFO = corte?.estado === "activo" ? idsVariantes
+          : [...variantesPorId.entries()].filter(([, variante]) => variante.inicioInventarioCero)
+            .map(([id]) => id);
+        const reservasExistentes = candidatasFIFO.length ? await tx.reservaStock.findMany({
+          where: { talleProductoId: { in: candidatasFIFO },
+            ...(corte?.estado === "activo" ? { estado: "activa" } : {}) },
+          select: { talleProductoId: true, cantidad: true, estado: true,
+            asignacionesPartida: { select: { cantidad: true, estado: true } } },
+        }) : [];
+        const variantesConReservaHeredada = new Set(reservasExistentes.filter((reserva) =>
+          reserva.asignacionesPartida.reduce((suma, asignacion) => suma + asignacion.cantidad, 0) !== reserva.cantidad
+          || (reserva.estado === "activa" && reserva.asignacionesPartida.some((asignacion) =>
+            !["reservada", "vendida"].includes(asignacion.estado))),
+        ).map((reserva) => reserva.talleProductoId));
+        if (corte?.estado === "activo" && variantesConReservaHeredada.size) {
+          throw new ErrorConfirmacionCheckout(409, "RESERVA_SIN_PARTIDA",
+            "Una reserva activa no tiene asignaciones de inventario");
+        }
+        const variantesFIFO = new Set(candidatasFIFO.filter((id) => !variantesConReservaHeredada.has(id)));
 
         const creadaEn = await horaBaseDatos(tx);
         const venceEn = new Date(creadaEn.getTime() + 24 * 60 * 60 * 1000);
@@ -147,12 +195,13 @@ export async function confirmarCheckout(usuarioId, entrada) {
           },
         });
         let sumaLineas = decimal(0);
+        const detallesPorVariante = new Map();
         for (const [indice, item] of carritoActual.items.entries()) {
           const variante = item.talleProducto;
           const precio = decimal(variante.producto.precio);
           const importe = precio.mul(item.cantidad);
           sumaLineas = sumaLineas.add(importe);
-          await tx.detalleOrden.create({
+          const detalle = await tx.detalleOrden.create({
             data: {
               ordenId: orden.id,
               posicion: indice + 1,
@@ -166,6 +215,11 @@ export async function confirmarCheckout(usuarioId, entrada) {
               importeLinea: importe,
             },
           });
+          if (variantesFIFO.has(variante.id)) {
+            const detalles = detallesPorVariante.get(variante.id) ?? [];
+            detalles.push({ id: detalle.id, cantidad: item.cantidad });
+            detallesPorVariante.set(variante.id, detalles);
+          }
         }
         if (!sumaLineas.equals(subtotal)) throw new Error("El subtotal no coincide con sus líneas");
         const cantidades = new Map();
@@ -174,9 +228,24 @@ export async function confirmarCheckout(usuarioId, entrada) {
             (cantidades.get(item.talleProductoId) ?? 0) + item.cantidad);
         }
         for (const [talleProductoId, cantidad] of [...cantidades.entries()].sort((a, b) => a[0] - b[0])) {
-          await tx.reservaStock.create({
+          const reserva = await tx.reservaStock.create({
             data: { ordenId: orden.id, talleProductoId, cantidad, estado: "activa", reservadaEn: creadaEn },
           });
+          if (!variantesFIFO.has(talleProductoId)) continue;
+          let asignadas = 0;
+          for (const detalle of detallesPorVariante.get(talleProductoId) ?? []) {
+            const seleccion = await seleccionarPartidasFIFO(
+              tx, talleProductoId, detalle.cantidad, variantesPorId.get(talleProductoId).stock,
+            );
+            for (const parte of seleccion) {
+              await tx.asignacionPartida.create({ data: {
+                ...parte, detalleOrdenId: detalle.id, reservaStockId: reserva.id,
+                estado: "reservada", reservadaEn: creadaEn,
+              } });
+              asignadas += parte.cantidad;
+            }
+          }
+          if (asignadas !== cantidad) throw new Error("La reserva no coincide con sus asignaciones FIFO");
         }
         await tx.eventoOrden.create({
           data: { ordenId: orden.id, fecha: creadaEn, origen: "cliente", actorUsuarioId: usuarioId,
@@ -186,6 +255,9 @@ export async function confirmarCheckout(usuarioId, entrada) {
         return { orden: await tx.orden.findUnique({ where: { id: orden.id }, include: ordenConDetalle }), creada: true };
       });
     } catch (error) {
+      if (error instanceof ErrorPartidas) {
+        throw new ErrorConfirmacionCheckout(409, error.codigo, error.message);
+      }
       if (error.code === "P2002" || error.code === "P2034") {
         const ganadora = await buscarPorClave(prisma, usuarioId, clave);
         if (ganadora) return { orden: comprobarReintento(ganadora, huella), creada: false };

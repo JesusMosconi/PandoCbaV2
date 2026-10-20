@@ -1,5 +1,9 @@
 import prisma from "../db.js";
-import { bloquearVariantes, horaBaseDatos, transicionarReservas } from "./inventario.js";
+import { bloquearVariantes, estadoInventarioParaEscritura, horaBaseDatos, transicionarReservas } from "./inventario.js";
+import { ErrorPartidas, reconocerVentaFIFO } from "./partidas.js";
+import { costoVentaOrden } from "./costos.js";
+import { aceptarDevolucionClienteTx, ErrorDevolucion } from "./devoluciones.js";
+import { centavos, importeDecimal } from "./importes.js";
 
 export function estadoVisible(orden, ahora) {
   return orden.estado === "pendiente_pago" && orden.venceEn && orden.venceEn <= ahora
@@ -50,6 +54,7 @@ export async function vencerOrdenBloqueada(tx, orden, ahora = null) {
 export async function vencerOrden(ordenId) {
   return prisma.$transaction(async (tx) => {
     const orden = await bloquearOrden(tx, ordenId);
+    if (orden) await estadoInventarioParaEscritura(tx);
     return vencerOrdenBloqueada(tx, orden);
   });
 }
@@ -82,6 +87,7 @@ export function presentarOrden(orden, ahora, { incluirEventos = false } = {}) {
     devolucion: orden.estado === "cancelada_admin" && orden.pagoConfirmadoEn
       ? "pendiente_de_gestionar" : null,
     detalles: (orden.detalles ?? []).map((detalle) => ({
+      id: detalle.id,
       posicion: detalle.posicion,
       nombreProducto: detalle.nombreProducto,
       talle: detalle.talle,
@@ -129,6 +135,7 @@ export async function cancelarOrdenCliente(usuarioId, ordenId) {
     });
     if (!propia) return { status: 404, message: "Orden no encontrada" };
     const orden = await bloquearOrden(tx, ordenId);
+    await estadoInventarioParaEscritura(tx);
     const reservas = await tx.reservaStock.findMany({
       where: { ordenId, estado: "activa" }, select: { talleProductoId: true },
     });
@@ -169,6 +176,11 @@ const incluirOrdenAdmin = {
   ...incluirOrdenCliente,
   usuario: { select: { id: true, nombre: true, apellido: true, email: true } },
   eventos: { orderBy: [{ fecha: "asc" }, { id: "asc" }] },
+  devolucionesCliente: {
+    include: { pagos: { orderBy: [{ fecha: "asc" }, { id: "asc" }] },
+      recepciones: { orderBy: [{ fecha: "asc" }, { id: "asc" }] } },
+    orderBy: [{ aceptadaEn: "asc" }, { id: "asc" }],
+  },
 };
 
 function presentarOrdenAdmin(orden, ahora) {
@@ -179,6 +191,33 @@ function presentarOrdenAdmin(orden, ahora) {
     restituirStock: orden.restituirStock,
     pagoConfirmadoPorId: orden.pagoConfirmadoPorId,
     envioCoordinadoPorId: orden.envioCoordinadoPorId,
+    devolucionesCliente: (orden.devolucionesCliente ?? []).map((devolucion) => {
+      const importeReintegradoAcumulado = devolucion.pagos.reduce((total, pago) =>
+        total + centavos(pago.importeEfectivo.toFixed(2)), 0n);
+      const debido = centavos(devolucion.importeDebido.toFixed(2));
+      return {
+        id: devolucion.id, ordenId: devolucion.ordenId, detalleOrdenId: devolucion.detalleOrdenId,
+        cantidad: devolucion.cantidad, estado: devolucion.estado,
+        esCancelacionAnteriorSalida: devolucion.claveOperacion === `cancelacion_pagada:${orden.id}`,
+        motivo: devolucion.motivo, aceptadaEn: devolucion.aceptadaEn.toISOString(),
+        motivoCierre: devolucion.motivoCierre, claveCierre: devolucion.claveCierre,
+        actorUsuarioId: devolucion.actorUsuarioId, cerradoPorId: devolucion.cerradoPorId,
+        cerradoEn: devolucion.cerradoEn?.toISOString() ?? null,
+        importeDebido: devolucion.importeDebido.toFixed(2),
+        importeReintegradoAcumulado: importeDecimal(importeReintegradoAcumulado),
+        saldoPendiente: importeDecimal(debido - importeReintegradoAcumulado),
+        costoRevertido: devolucion.costoRevertido?.toFixed(2) ?? null,
+        unidadesCostoDesconocido: devolucion.unidadesCostoDesconocido,
+        pagos: devolucion.pagos.map((pago) => ({ id: pago.id, devolucionId: pago.devolucionId,
+          importeEfectivo: pago.importeEfectivo.toFixed(2), claveOperacion: pago.claveOperacion,
+          actorUsuarioId: pago.actorUsuarioId, fecha: pago.fecha.toISOString() })),
+        recepciones: devolucion.recepciones.map((recepcion) => ({ id: recepcion.id,
+          devolucionId: recepcion.devolucionId, claveOperacion: recepcion.claveOperacion,
+          actorUsuarioId: recepcion.actorUsuarioId, motivo: recepcion.motivo,
+          cantidadApta: recepcion.cantidadApta, cantidadDanada: recepcion.cantidadDanada,
+          fecha: recepcion.fecha.toISOString() })),
+      };
+    }),
   };
 }
 
@@ -221,6 +260,7 @@ export async function obtenerOrdenAdmin(ordenId) {
   const presentada = presentarOrdenAdmin(orden, ahora);
   return {
     ...presentada,
+    costoMercaderia: await costoVentaOrden(orden),
     eventos: presentada.eventos.map((evento) => ({
       ...evento,
       actorNombre: evento.actorUsuarioId ? (nombres.get(evento.actorUsuarioId) ?? null) : null,
@@ -229,9 +269,11 @@ export async function obtenerOrdenAdmin(ordenId) {
 }
 
 export async function confirmarPagoAdmin(ordenId, actorUsuarioId) {
-  return prisma.$transaction(async (tx) => {
+  try {
+    return await prisma.$transaction(async (tx) => {
     const orden = await bloquearOrden(tx, ordenId);
     if (!orden) return { status: 404, message: "Orden no encontrada" };
+    await estadoInventarioParaEscritura(tx);
     const reservas = await tx.reservaStock.findMany({
       where: { ordenId, estado: "activa" }, select: { talleProductoId: true },
     });
@@ -260,13 +302,18 @@ export async function confirmarPagoAdmin(ordenId, actorUsuarioId) {
       data: { estado: "pago_confirmado", pagoConfirmadoEn: ahora, pagoConfirmadoPorId: actorUsuarioId },
     });
     if (cambio.count !== 1) throw new Error("La orden cambió durante la confirmación del pago");
+    await reconocerVentaFIFO(tx, ordenId, ahora);
     await tx.eventoOrden.create({
       data: { ordenId, fecha: ahora, origen: "administracion", actorUsuarioId,
         estadoAnterior: "pendiente_pago", estadoNuevo: "pago_confirmado" },
     });
     const actual = await tx.orden.findUnique({ where: { id: ordenId }, include: incluirOrdenAdmin });
     return { status: 200, orden: presentarOrdenAdmin(actual, ahora), importeAcreditado: orden.subtotal.toString() };
-  });
+    });
+  } catch (error) {
+    if (error instanceof ErrorPartidas) return { status: 409, message: error.message, codigo: error.codigo };
+    throw error;
+  }
 }
 
 const siguientesEstados = {
@@ -280,6 +327,7 @@ export async function cambiarEstadoAdmin(ordenId, actorUsuarioId, destino, envio
   return prisma.$transaction(async (tx) => {
     const orden = await bloquearOrden(tx, ordenId);
     if (!orden) return { status: 404, message: "Orden no encontrada" };
+    await estadoInventarioParaEscritura(tx);
     const ahora = await horaBaseDatos(tx);
     if (!orden.creadaEn || !orden.venceEn) {
       return { status: 409, message: "La orden heredada no admite este flujo" };
@@ -303,7 +351,7 @@ export async function cambiarEstadoAdmin(ordenId, actorUsuarioId, destino, envio
         orden: presentarOrdenAdmin(actual, ahora) };
     }
     if (destino === "enviada" || (destino === "entregada" && orden.tipoEntrega === "retiro")) {
-      await transicionarReservas(tx, ordenId, "consumida", ahora);
+      await transicionarReservas(tx, ordenId, "consumida", ahora, actorUsuarioId);
     }
     const cambio = await tx.orden.updateMany({
       where: { id: ordenId, estado: orden.estado },
@@ -327,11 +375,12 @@ export async function cancelarOrdenAdmin(ordenId, actorUsuarioId, motivo, restit
   if (!motivoLimpio || motivoLimpio.length > 500) {
     return { status: 400, message: "Indicá un motivo de cancelación de hasta 500 caracteres" };
   }
-  return prisma.$transaction(async (tx) => {
+  try { return await prisma.$transaction(async (tx) => {
     const orden = await bloquearOrden(tx, ordenId);
     if (!orden) return { status: 404, message: "Orden no encontrada" };
+    const corte = await estadoInventarioParaEscritura(tx);
     const reservas = await tx.reservaStock.findMany({
-      where: { ordenId }, select: { talleProductoId: true },
+      where: { ordenId }, orderBy: { talleProductoId: "asc" },
     });
     await bloquearVariantes(tx, reservas.map((reserva) => reserva.talleProductoId));
     const ahora = await horaBaseDatos(tx);
@@ -361,20 +410,50 @@ export async function cancelarOrdenAdmin(ordenId, actorUsuarioId, motivo, restit
     if (pagada && typeof restituirStock !== "boolean") {
       return { status: 400, message: "Indicá expresamente si se restituye el stock" };
     }
+    if (pagada && (orden.estado === "enviada" || reservas.some((reserva) => reserva.estado !== "activa"))) {
+      return { status: 409, codigo: "DEVOLUCION_REQUERIDA",
+        message: "La orden ya tuvo salida física; gestioná una devolución" };
+    }
 
-    if (pendiente || (restituirStock === true && orden.estado !== "enviada")) {
+    if (pendiente) {
       await transicionarReservas(tx, ordenId, "liberada", ahora);
-    } else if (pagada && restituirStock === false && orden.estado !== "enviada") {
-      await transicionarReservas(tx, ordenId, "consumida", ahora);
-    } else if (orden.estado === "enviada" && restituirStock === true) {
-      const consumidas = await tx.reservaStock.findMany({
-        where: { ordenId, estado: "consumida" }, orderBy: { talleProductoId: "asc" },
-      });
-      await bloquearVariantes(tx, consumidas.map((reserva) => reserva.talleProductoId));
-      for (const reserva of consumidas) {
-        await tx.talleProducto.update({
-          where: { id: reserva.talleProductoId }, data: { stock: { increment: reserva.cantidad } },
+    } else if (corte.estado !== "activo" && await tx.asignacionPartida.count({
+      where: { detalleOrden: { ordenId } },
+    }) === 0) {
+      // Las ventas heredadas anteriores al corte no tienen procedencia FIFO.
+      // Conservan la cancelación previa a la salida, sin inventar un costo.
+      await transicionarReservas(tx, ordenId, restituirStock ? "liberada" : "consumida", ahora, actorUsuarioId);
+    } else {
+      const detalles = await tx.detalleOrden.findMany({ where: { ordenId },
+        select: { id: true, cantidad: true } });
+      await aceptarDevolucionClienteTx(tx, ordenId, {
+        lineas: detalles.map((detalle) => ({ detalleOrdenId: detalle.id, cantidad: detalle.cantidad })),
+        motivo: motivoLimpio, claveOperacion: `cancelacion_pagada:${ordenId}`,
+      }, actorUsuarioId, { permitirSinSalida: true });
+      for (const reserva of reservas) {
+        const asignaciones = await tx.asignacionPartida.findMany({
+          where: { reservaStockId: reserva.id }, select: { partidaId: true, cantidad: true, estado: true },
         });
+        if (asignaciones.reduce((total, asignacion) => total + asignacion.cantidad, 0) !== reserva.cantidad
+          || asignaciones.some((asignacion) => asignacion.estado !== "revertida")) {
+          throw new ErrorDevolucion(409, "ASIGNACION_INCONCILIABLE", "La reserva no coincide con la reversión FIFO");
+        }
+        if (!restituirStock) {
+          const variante = await tx.talleProducto.updateMany({
+            where: { id: reserva.talleProductoId, stock: { gte: reserva.cantidad } },
+            data: { stock: { decrement: reserva.cantidad } },
+          });
+          if (variante.count !== 1) throw new ErrorDevolucion(409, "STOCK_INSUFICIENTE", "Stock físico insuficiente");
+          for (const asignacion of asignaciones) {
+            await tx.movimientoInventario.create({ data: {
+              varianteId: reserva.talleProductoId, partidaId: asignacion.partidaId,
+              tipo: "salida_no_vendible", cantidad: -asignacion.cantidad, actorUsuarioId, fecha: ahora,
+            } });
+          }
+        }
+        await tx.reservaStock.update({ where: { id: reserva.id }, data: restituirStock
+          ? { estado: "liberada", liberadaEn: ahora }
+          : { estado: "consumida", consumidaEn: ahora } });
       }
     }
 
@@ -395,7 +474,10 @@ export async function cancelarOrdenAdmin(ordenId, actorUsuarioId, motivo, restit
     });
     const actual = await tx.orden.findUnique({ where: { id: ordenId }, include: incluirOrdenAdmin });
     return { status: 200, orden: presentarOrdenAdmin(actual, ahora) };
-  });
+  }); } catch (error) {
+    if (error instanceof ErrorDevolucion) return { status: error.status, codigo: error.codigo, message: error.message };
+    throw error;
+  }
 }
 
 export async function barrerOrdenesVencidas({ limite = 100, excluirIds = [] } = {}) {

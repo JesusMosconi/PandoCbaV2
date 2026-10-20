@@ -6,6 +6,7 @@ import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
 import { whereProductoVisible } from "../utils/visibilidad-producto.js";
 import { presentarVariantesConDisponibilidad } from "../services/inventario.js";
+import { actualizarVigenciaPrecio, registrarPrecioInicial } from "../services/precios.js";
 
 const router = Router();
 const requerirAdmin = [verificarToken, esAdmin];
@@ -67,23 +68,55 @@ router.post("/productos", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   const { nombre, precio, categoriaId, descripcion, activo, web, coleccionId } = req.body;
-  res.json(await prisma.producto.create({ data: {
-    nombre, precio, categoriaId, descripcion, activo, web, coleccionId,
-  } }));
+  const producto = await prisma.$transaction(async (tx) => {
+    const creado = await tx.producto.create({ data: {
+      nombre, precio, categoriaId, descripcion, activo, web, coleccionId,
+    } });
+    await registrarPrecioInicial(tx, creado);
+    return creado;
+  });
+  res.json(producto);
 }));
 
 router.put("/productos/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
   const { nombre, precio, categoriaId, descripcion, activo, web, coleccionId } = req.body;
-  res.json(await prisma.producto.update({
-    where: { id: Number(req.params.id) },
-    data: { nombre, precio, categoriaId, descripcion, activo, web, coleccionId },
-  }));
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: "Identificador inválido" });
+  const resultado = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Producto" WHERE "id" = ${id} FOR UPDATE`;
+    const actual = await tx.producto.findUnique({ where: { id } });
+    if (!actual) return { status: 404, message: "Producto no encontrado" };
+    if (actual.creadoDesdeCompras && web === true && !actual.web) {
+      const ingresosConfirmados = await tx.partidaInventario.count({
+        where: { variante: { productoId: id }, ingreso: { estado: "confirmado" } },
+      });
+      if (ingresosConfirmados === 0) {
+        return { status: 409, message: "Confirmá un ingreso de alguna variante antes de publicar el producto" };
+      }
+    }
+    const nuevo = await tx.producto.update({
+      where: { id },
+      data: { nombre, precio, categoriaId, descripcion, activo, web, coleccionId },
+    });
+    await actualizarVigenciaPrecio(tx, actual, nuevo);
+    return { valor: nuevo };
+  });
+  if (resultado.status) return res.status(resultado.status).json({ message: resultado.message });
+  res.json(resultado.valor);
 }));
 
 router.delete("/productos/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
-  await prisma.producto.update({ where: { id: Number(req.params.id) }, data: { activo: false } });
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: "Identificador inválido" });
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Producto" WHERE "id" = ${id} FOR UPDATE`;
+    const anterior = await tx.producto.findUnique({ where: { id } });
+    if (!anterior) return;
+    const nuevo = await tx.producto.update({ where: { id }, data: { activo: false } });
+    await actualizarVigenciaPrecio(tx, anterior, nuevo);
+  });
   res.json({ message: "Producto desactivado" });
 }));
 

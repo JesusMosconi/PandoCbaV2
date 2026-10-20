@@ -107,8 +107,9 @@ test("carreras con pago y cancelación después de T generan una sola transició
     const escenario = await crearEscenario({ stock: 1 });
     try {
       const orden = await crearOrden(escenario);
+      const horaBase = await horaBaseDatos(escenario.prisma);
       await escenario.prisma.orden.update({ where: { id: orden.id }, data: {
-        venceEn: new Date(Date.now() - 1000),
+        venceEn: new Date(horaBase.getTime() - 60_000),
       } });
       const actuar = accion === "pago"
         ? confirmarPagoAdmin(orden.id, escenario.usuarios[0].id)

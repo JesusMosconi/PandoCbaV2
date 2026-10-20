@@ -64,6 +64,7 @@ model Producto {
   CreatedAt    DateTime       @default(now())
   UpdatedAt    DateTime       @updatedAt
   web          Boolean        @default(true)
+  creadoDesdeCompras Boolean  @default(false)
   categoria    Categoria      @relation(fields: [categoriaId], references: [id])
   categoriaId  Int
   coleccion    Coleccion?     @relation(fields: [coleccionId], references: [id])
@@ -73,6 +74,20 @@ model Producto {
   favoritos    Favorito[]
   catalogos    CatalogoInicio[]
   detallesOrden DetalleOrden[]
+  vigenciasPrecio VigenciaPrecio[]
+}
+
+model VigenciaPrecio {
+  id          Int      @id @default(autoincrement())
+  producto    Producto @relation(fields: [productoId], references: [id], onDelete: Restrict)
+  productoId  Int
+  clase       String
+  importe     Decimal
+  inicio      DateTime @db.Timestamptz(3)
+  fin         DateTime? @db.Timestamptz(3)
+  origen      String
+
+  @@index([productoId, clase, inicio])
 }
 
 
@@ -93,6 +108,7 @@ model Color {
 model TalleProducto {
   id         Int          @id @default(autoincrement())
   stock      Int
+  inicioInventarioCero Boolean @default(false)
   estado     String
   producto   Producto     @relation(fields: [productoId], references: [id])
   productoId Int
@@ -103,7 +119,322 @@ model TalleProducto {
   itemsCarrito ItemCarrito[]
   detallesOrden DetalleOrden[]
   reservasStock ReservaStock[]
+  lineasIngreso LineaIngreso[]
+  partidasInventario PartidaInventario[]
+  movimientosInventario MovimientoInventario[]
+  asignacionesPartida AsignacionPartida[]
+  estadoCorteInventario EstadoCorteVariante?
+  existenciaInicial ExistenciaInicial?
   @@unique([productoId, talleId, colorId])
+}
+
+model Proveedor {
+  id            Int               @id @default(autoincrement())
+  nombre        String
+  contacto      String?
+  observaciones String?
+  activo        Boolean           @default(true)
+  creadoEn      DateTime          @default(now()) @db.Timestamptz(3)
+  actualizadoEn DateTime          @updatedAt @db.Timestamptz(3)
+  eventos       EventoProveedor[]
+  ingresos      Ingreso[]
+}
+
+model EventoProveedor {
+  id             Int       @id @default(autoincrement())
+  proveedor      Proveedor @relation(fields: [proveedorId], references: [id])
+  proveedorId    Int
+  tipo           String
+  motivo         String
+  valoresAnteriores Json?
+  valoresNuevos     Json?
+  actorUsuarioId Int
+  fecha          DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([proveedorId, fecha])
+}
+
+model Ingreso {
+  id                    Int                    @id @default(autoincrement())
+  proveedor             Proveedor              @relation(fields: [proveedorId], references: [id])
+  proveedorId           Int
+  fechaCompra           DateTime               @db.Date
+  fechaRecepcion        DateTime               @db.Date
+  estado                String                 @default("borrador")
+  observaciones         String?
+  comprobanteReferencia String?
+  claveOperacion        String?                @unique
+  huellaSolicitud       String?
+  creadoEn              DateTime               @default(now()) @db.Timestamptz(3)
+  confirmadoEn          DateTime?              @db.Timestamptz(3)
+  confirmadoPorId       Int?
+  gastosAdicionales     GastoAdicionalCompra[]
+  lineas                LineaIngreso[]
+  partidas              PartidaInventario[]
+  movimientos           MovimientoInventario[]
+  correcciones           CorreccionIngreso[]
+  devolucionesProveedor  DevolucionProveedor[]
+
+  @@index([proveedorId, fechaRecepcion])
+  @@index([estado, fechaRecepcion])
+}
+
+model GastoAdicionalCompra {
+  id        Int     @id @default(autoincrement())
+  ingreso   Ingreso @relation(fields: [ingresoId], references: [id])
+  ingresoId Int
+  concepto  String
+  importe   Decimal @db.Decimal(14, 2)
+  activo    Boolean @default(true)
+
+  @@index([ingresoId])
+}
+
+model LineaIngreso {
+  id            Int           @id @default(autoincrement())
+  ingreso       Ingreso       @relation(fields: [ingresoId], references: [id])
+  ingresoId     Int
+  variante      TalleProducto @relation(fields: [varianteId], references: [id])
+  varianteId    Int
+  cantidad      Int
+  costoUnitario Decimal       @db.Decimal(14, 2)
+  activo        Boolean       @default(true)
+
+  @@unique([ingresoId, varianteId])
+  @@index([varianteId])
+}
+
+model PartidaInventario {
+  id               Int                    @id @default(autoincrement())
+  variante         TalleProducto          @relation(fields: [varianteId], references: [id])
+  varianteId       Int
+  ingreso          Ingreso?               @relation(fields: [ingresoId], references: [id], onDelete: Restrict)
+  ingresoId        Int?
+  origen           String
+  cantidadOriginal Int
+  costoUnitario    Decimal?               @db.Decimal(14, 2)
+  fechaRecepcion   DateTime?              @db.Date
+  confirmadaEn     DateTime               @default(now()) @db.Timestamptz(3)
+  movimientos      MovimientoInventario[]
+  asignaciones     AsignacionPartida[]
+  existenciaInicial ExistenciaInicial?
+  correcciones       CorreccionIngreso[]
+  devolucionesProveedor DevolucionProveedor[]
+  recepcionesDevolucion RecepcionDevolucion[]
+  recepcionCliente RecepcionDevolucion? @relation("PartidasRecepcionCliente", fields: [recepcionClienteId], references: [id], onDelete: Restrict)
+  recepcionClienteId Int?
+  asignacionOrigen AsignacionPartida? @relation("OrigenPartidaDevuelta", fields: [asignacionOrigenId], references: [id], onDelete: Restrict)
+  asignacionOrigenId Int?
+
+  @@index([varianteId, origen, fechaRecepcion, confirmadaEn, id])
+  @@index([ingresoId])
+  @@index([recepcionClienteId])
+  @@index([asignacionOrigenId])
+}
+
+model MovimientoInventario {
+  id             Int              @id @default(autoincrement())
+  variante       TalleProducto    @relation(fields: [varianteId], references: [id])
+  varianteId     Int
+  partida        PartidaInventario? @relation(fields: [partidaId], references: [id], onDelete: Restrict)
+  partidaId      Int?
+  ingreso        Ingreso?         @relation(fields: [ingresoId], references: [id], onDelete: Restrict)
+  ingresoId      Int?
+  tipo           String
+  cantidad       Int
+  motivo         String?
+  actorUsuarioId Int?
+  fecha          DateTime         @default(now()) @db.Timestamptz(3)
+  existenciaInicial ExistenciaInicial?
+
+  @@index([varianteId, fecha])
+  @@index([partidaId, fecha])
+  @@index([ingresoId])
+}
+
+model EstadoCorteInventario {
+  id                    Int                  @id @default(1)
+  estado                String               @default("pendiente")
+  iniciadoEn            DateTime?            @db.Timestamptz(3)
+  conciliadoEn          DateTime?            @db.Timestamptz(3)
+  activadoEn            DateTime?            @db.Timestamptz(3)
+  rutasVerificadasEn    DateTime?            @db.Timestamptz(3)
+  rutasVerificadasPorId Int?
+  activadoPorId         Int?
+  suspendido            Boolean              @default(false)
+  actualizadoEn         DateTime             @updatedAt @db.Timestamptz(3)
+  variantes             EstadoCorteVariante[]
+}
+
+model EstadoCorteVariante {
+  id              Int                   @id @default(autoincrement())
+  variante        TalleProducto         @relation(fields: [varianteId], references: [id], onDelete: Restrict)
+  varianteId      Int                   @unique
+  corte           EstadoCorteInventario @relation(fields: [corteId], references: [id], onDelete: Restrict)
+  corteId         Int
+  estado          String                @default("pendiente")
+  origen          String?
+  saldoCapturado  Int?
+  comprometido    Int?
+  diferencia      Int?
+  motivo          String?
+  conciliadoEn    DateTime?             @db.Timestamptz(3)
+  conciliadoPorId Int?
+  existenciaInicial ExistenciaInicial?
+
+  @@index([corteId, estado])
+}
+
+model ExistenciaInicial {
+  id              Int                @id @default(autoincrement())
+  variante        TalleProducto      @relation(fields: [varianteId], references: [id], onDelete: Restrict)
+  varianteId      Int                @unique
+  estadoVariante  EstadoCorteVariante @relation(fields: [estadoVarianteId], references: [id], onDelete: Restrict)
+  estadoVarianteId Int               @unique
+  partida         PartidaInventario  @relation(fields: [partidaId], references: [id], onDelete: Restrict)
+  partidaId       Int                @unique
+  movimiento      MovimientoInventario @relation(fields: [movimientoId], references: [id], onDelete: Restrict)
+  movimientoId    Int                @unique
+  saldoFisico     Int
+  costoUnitario   Decimal?           @db.Decimal(14, 2)
+  capturadoEn     DateTime           @db.Timestamptz(3)
+  actorUsuarioId  Int
+}
+
+model AsignacionPartida {
+  id                     Int               @id @default(autoincrement())
+  partida                PartidaInventario @relation(fields: [partidaId], references: [id], onDelete: Restrict)
+  partidaId              Int
+  variante               TalleProducto     @relation(fields: [varianteId], references: [id], onDelete: Restrict)
+  varianteId             Int
+  detalleOrden           DetalleOrden      @relation(fields: [detalleOrdenId], references: [id], onDelete: Restrict)
+  detalleOrdenId         Int
+  reservaStock           ReservaStock      @relation(fields: [reservaStockId], references: [id], onDelete: Restrict)
+  reservaStockId         Int
+  cantidad               Int
+  estado                 String            @default("reservada")
+  costoUnitarioAlPago    Decimal?          @db.Decimal(14, 2)
+  importeEfectivo        Decimal?          @db.Decimal(14, 2)
+  descuentoAtribuido     Decimal?          @db.Decimal(14, 2)
+  reservadaEn            DateTime          @default(now()) @db.Timestamptz(3)
+  vendidaEn              DateTime?         @db.Timestamptz(3)
+  liberadaEn             DateTime?         @db.Timestamptz(3)
+  revertidaEn            DateTime?         @db.Timestamptz(3)
+  devolucionesCliente    DevolucionClienteAsignacion[]
+  partidasDevueltas      PartidaInventario[] @relation("OrigenPartidaDevuelta")
+
+  @@index([varianteId, estado, partidaId])
+  @@index([partidaId, estado])
+  @@index([reservaStockId, estado])
+  @@index([detalleOrdenId, estado])
+}
+
+model CorreccionIngreso {
+  id             Int               @id @default(autoincrement())
+  ingreso        Ingreso           @relation(fields: [ingresoId], references: [id], onDelete: Restrict)
+  ingresoId      Int
+  partida        PartidaInventario @relation(fields: [partidaId], references: [id], onDelete: Restrict)
+  partidaId      Int
+  campo          String
+  valorAnterior  Json
+  valorNuevo     Json
+  diferenciaCosto Decimal?         @db.Decimal(14, 2)
+  motivo         String
+  claveOperacion String            @unique
+  actorUsuarioId Int
+  fecha          DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([ingresoId, fecha])
+  @@index([partidaId, fecha])
+}
+
+model DevolucionProveedor {
+  id                Int               @id @default(autoincrement())
+  ingreso           Ingreso           @relation(fields: [ingresoId], references: [id], onDelete: Restrict)
+  ingresoId         Int
+  partida           PartidaInventario @relation(fields: [partidaId], references: [id], onDelete: Restrict)
+  partidaId         Int
+  cantidad          Int
+  importeRevertido  Decimal           @db.Decimal(14, 2)
+  motivo            String
+  claveOperacion    String            @unique
+  actorUsuarioId    Int
+  fecha             DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([ingresoId, fecha])
+  @@index([partidaId, fecha])
+}
+
+model DevolucionCliente {
+  id                    Int               @id @default(autoincrement())
+  orden                 Orden             @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+  ordenId               Int
+  detalleOrden          DetalleOrden      @relation(fields: [detalleOrdenId], references: [id], onDelete: Restrict)
+  detalleOrdenId        Int
+  cantidad              Int
+  importeDebido         Decimal           @db.Decimal(14, 2)
+  costoRevertido        Decimal?          @db.Decimal(14, 2)
+  unidadesCostoDesconocido Int            @default(0)
+  estado                String            @default("pendiente")
+  motivo                String
+  motivoCierre          String?
+  claveOperacion        String
+  huellaSolicitud       String
+  claveCierre           String?           @unique
+  actorUsuarioId        Int
+  cerradoPorId          Int?
+  aceptadaEn            DateTime          @default(now()) @db.Timestamptz(3)
+  cerradoEn             DateTime?         @db.Timestamptz(3)
+  asignaciones          DevolucionClienteAsignacion[]
+  pagos                 PagoReintegro[]
+  recepciones           RecepcionDevolucion[]
+
+  @@index([ordenId, aceptadaEn])
+  @@index([detalleOrdenId, aceptadaEn])
+  @@unique([claveOperacion, detalleOrdenId])
+}
+
+model DevolucionClienteAsignacion {
+  id                Int                @id @default(autoincrement())
+  devolucion        DevolucionCliente  @relation(fields: [devolucionId], references: [id], onDelete: Restrict)
+  devolucionId      Int
+  asignacion        AsignacionPartida  @relation(fields: [asignacionId], references: [id], onDelete: Restrict)
+  asignacionId      Int
+  cantidad          Int
+  importeEfectivo   Decimal            @db.Decimal(14, 2)
+  costoRevertido    Decimal?           @db.Decimal(14, 2)
+
+  @@unique([devolucionId, asignacionId])
+  @@index([asignacionId])
+}
+
+model PagoReintegro {
+  id                 Int               @id @default(autoincrement())
+  devolucion         DevolucionCliente @relation(fields: [devolucionId], references: [id], onDelete: Restrict)
+  devolucionId       Int
+  importeEfectivo    Decimal           @db.Decimal(14, 2)
+  claveOperacion     String            @unique
+  actorUsuarioId     Int
+  fecha              DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([devolucionId, fecha])
+}
+
+model RecepcionDevolucion {
+  id                 Int               @id @default(autoincrement())
+  devolucion         DevolucionCliente @relation(fields: [devolucionId], references: [id], onDelete: Restrict)
+  devolucionId       Int
+  partida            PartidaInventario? @relation(fields: [partidaId], references: [id], onDelete: Restrict)
+  partidaId          Int?
+  cantidadApta       Int
+  cantidadDanada     Int
+  motivo             String?
+  claveOperacion     String            @unique
+  actorUsuarioId     Int
+  fecha              DateTime          @default(now()) @db.Timestamptz(3)
+  partidas           PartidaInventario[] @relation("PartidasRecepcionCliente")
+
+  @@index([devolucionId, fecha])
 }
 
 model ImgProducto {
@@ -184,6 +515,7 @@ model Orden {
   detalles     DetalleOrden[]
   reservas     ReservaStock[]
   eventos      EventoOrden[]
+  devolucionesCliente DevolucionCliente[]
 
   @@unique([usuarioId, claveConfirmacion])
   @@index([usuarioId, creadaEn])
@@ -205,6 +537,8 @@ model DetalleOrden {
   cantidad        Int
   precioUnitario  Decimal
   importeLinea    Decimal
+  asignacionesPartida AsignacionPartida[]
+  devolucionesCliente DevolucionCliente[]
 
   @@unique([ordenId, posicion])
 }
@@ -220,6 +554,7 @@ model ReservaStock {
   reservadaEn     DateTime        @db.Timestamptz(3)
   liberadaEn      DateTime?       @db.Timestamptz(3)
   consumidaEn     DateTime?       @db.Timestamptz(3)
+  asignacionesPartida AsignacionPartida[]
 
   @@unique([ordenId, talleProductoId])
   @@index([talleProductoId, estado])

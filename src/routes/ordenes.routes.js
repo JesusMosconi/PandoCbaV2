@@ -3,6 +3,7 @@ import { verificarToken } from "../middleware/auth.js";
 import { esCliente } from "../middleware/es-cliente.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { cancelarOrdenCliente, listarOrdenesCliente, obtenerOrdenCliente } from "../services/ordenes.js";
+import { ErrorInventario } from "../services/inventario.js";
 
 const router = Router();
 router.use("/ordenes", verificarToken, esCliente);
@@ -37,5 +38,11 @@ router.post("/ordenes/:id/cancelacion", asyncHandler(async (req, res) => {
     },
   );
 }));
+
+router.use((error, req, res, next) => {
+  if (!(error instanceof ErrorInventario)) return next(error);
+  return res.status(409).set("Cache-Control", "no-store")
+    .json({ codigo: error.codigo, message: error.message });
+});
 
 export default router;
