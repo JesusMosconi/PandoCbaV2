@@ -8,6 +8,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "node --test",
+    "vencer-ordenes": "node src/jobs/vencer-ordenes.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "postinstall": "prisma generate"
   },
   "author": "",

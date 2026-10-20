@@ -72,6 +72,7 @@ model Producto {
   imagenes     ImgProducto[]
   favoritos    Favorito[]
   catalogos    CatalogoInicio[]
+  detallesOrden DetalleOrden[]
 }
 
 
@@ -100,6 +101,8 @@ model TalleProducto {
   color      Color        @relation(fields: [colorId], references: [id])
   colorId    Int
   itemsCarrito ItemCarrito[]
+  detallesOrden DetalleOrden[]
+  reservasStock ReservaStock[]
   @@unique([productoId, talleId, colorId])
 }
 
@@ -157,16 +160,84 @@ model Orden {
   tipoEntrega  String
   estado       String         @default("pendiente")
   subtotal     Decimal
-  costoEnvio   Decimal        @default(0)
-  total        Decimal
+  costoEnvio   Decimal?
+  total        Decimal?
   metodoPago   String
   fechaCreado  DateTime       @default(now())
+  creadaEn     DateTime?      @db.Timestamptz(3)
+  venceEn      DateTime?      @db.Timestamptz(3)
+  claveConfirmacion String?
+  huellaSolicitud String?
+  pagoConfirmadoEn DateTime? @db.Timestamptz(3)
+  pagoConfirmadoPorId Int?
+  envioCoordinadoEn DateTime? @db.Timestamptz(3)
+  envioCoordinadoPorId Int?
+  canceladaEn DateTime? @db.Timestamptz(3)
+  motivoCancelacion String?
+  restituirStock Boolean?
   usuario      Usuario        @relation(fields: [usuarioId], references: [id])
   usuarioId    Int
   carrito      Carrito        @relation(fields: [carritoId], references: [id])
   carritoId    Int            @unique
   datosEnvio   DatosEnvio?
   actividades  ActividadAdmin[]
+  detalles     DetalleOrden[]
+  reservas     ReservaStock[]
+  eventos      EventoOrden[]
+
+  @@unique([usuarioId, claveConfirmacion])
+  @@index([usuarioId, creadaEn])
+  @@index([estado, venceEn])
+}
+
+model DetalleOrden {
+  id              Int            @id @default(autoincrement())
+  orden           Orden          @relation(fields: [ordenId], references: [id])
+  ordenId         Int
+  posicion        Int
+  producto        Producto?      @relation(fields: [productoId], references: [id], onDelete: SetNull)
+  productoId      Int?
+  talleProducto   TalleProducto? @relation(fields: [talleProductoId], references: [id], onDelete: SetNull)
+  talleProductoId Int?
+  nombreProducto  String
+  talle           String
+  color           String
+  cantidad        Int
+  precioUnitario  Decimal
+  importeLinea    Decimal
+
+  @@unique([ordenId, posicion])
+}
+
+model ReservaStock {
+  id              Int             @id @default(autoincrement())
+  orden           Orden           @relation(fields: [ordenId], references: [id])
+  ordenId         Int
+  talleProducto   TalleProducto   @relation(fields: [talleProductoId], references: [id])
+  talleProductoId Int
+  cantidad        Int
+  estado          String
+  reservadaEn     DateTime        @db.Timestamptz(3)
+  liberadaEn      DateTime?       @db.Timestamptz(3)
+  consumidaEn     DateTime?       @db.Timestamptz(3)
+
+  @@unique([ordenId, talleProductoId])
+  @@index([talleProductoId, estado])
+}
+
+model EventoOrden {
+  id              Int       @id @default(autoincrement())
+  orden           Orden     @relation(fields: [ordenId], references: [id])
+  ordenId         Int
+  fecha           DateTime  @db.Timestamptz(3)
+  origen          String
+  actorUsuarioId  Int?
+  estadoAnterior  String?
+  estadoNuevo     String
+  motivo          String?
+  restituirStock  Boolean?
+
+  @@index([ordenId, fecha])
 }
 
 model DatosEnvio {

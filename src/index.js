@@ -15,6 +15,9 @@ import imagenesNosotrosRoutes from "./routes/imagenes-nosotros.routes.js";
 import suscripcionRoutes from "./routes/suscripcion.routes.js";
 import usuariosRoutes from "./routes/usuarios.routes.js";
 import carritoRoutes from "./routes/carrito.routes.js";
+import checkoutRoutes from "./routes/checkout.routes.js";
+import ordenesRoutes from "./routes/ordenes.routes.js";
+import adminOrdenesRoutes from "./routes/admin-ordenes.routes.js";
 
 const app = express();
 
@@ -38,6 +41,9 @@ app.use("/api", imagenesNosotrosRoutes);
 app.use("/api", suscripcionRoutes);
 app.use("/api", usuariosRoutes);
 app.use("/api", carritoRoutes);
+app.use("/api", checkoutRoutes);
+app.use("/api", ordenesRoutes);
+app.use("/api", adminOrdenesRoutes);
 
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError || error?.message?.includes("no permitido")) {

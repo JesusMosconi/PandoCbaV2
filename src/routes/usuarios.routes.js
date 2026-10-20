@@ -18,7 +18,7 @@ const generarToken = (usuario) =>
   jwt.sign(
     { id: usuario.id, rol: usuario.rol, email: usuario.email },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+    { expiresIn: process.env.JWT_EXPIRES_IN || "12h" }
   );
 
 router.post("/usuarios/registro", async (req, res) => {

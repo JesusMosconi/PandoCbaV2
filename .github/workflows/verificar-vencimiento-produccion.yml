@@ -1,0 +1,65 @@
+name: Verificar vencimiento de producción
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Validar destino
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          node --input-type=module -e '
+            const valor = process.env.DATABASE_URL;
+            if (!valor) throw new Error("Falta PRODUCTION_DATABASE_URL");
+            const url = new URL(valor);
+            const hostsPermitidos = new Set([
+              "ep-raspy-breeze-aclw045d.sa-east-1.aws.neon.tech",
+              "ep-raspy-breeze-aclw045d-pooler.sa-east-1.aws.neon.tech",
+            ]);
+            if (!hostsPermitidos.has(url.hostname) || url.pathname !== "/neondb") {
+              throw new Error("La conexión no corresponde a la base de producción verificada");
+            }
+          '
+      - name: Instalar dependencias
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npm ci
+      - name: Comprobar migración y órdenes sin escribir
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          node --input-type=module -e '
+            import { Client } from "pg";
+            const db = new Client({ connectionString: process.env.DATABASE_URL });
+            await db.connect();
+            try {
+              await db.query("BEGIN READ ONLY");
+              const migracion = await db.query(
+                "SELECT count(*)::int AS aplicadas FROM public.\"_prisma_migrations\" WHERE migration_name = $1 AND finished_at IS NOT NULL AND rolled_back_at IS NULL",
+                ["20261011_checkout_ordenes"],
+              );
+              if (migracion.rows[0].aplicadas !== 1) throw new Error("Falta la migración de checkout");
+              const ordenes = await db.query(
+                "SELECT count(*)::int AS pendientes, count(*) FILTER (WHERE \"venceEn\" <= clock_timestamp())::int AS vencidas FROM public.\"Orden\" WHERE estado = $1",
+                ["pendiente_pago"],
+              );
+              console.log(JSON.stringify({ migracionCheckoutAplicada: true, ...ordenes.rows[0] }));
+              await db.query("ROLLBACK");
+            } finally {
+              await db.end();
+            }
+          '
