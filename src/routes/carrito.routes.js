@@ -32,30 +32,9 @@ async function presentarCarrito(carrito, tx = prisma) {
   };
 }
 
-async function devolverCarritoActualizado(carritoId) {
-  await marcarCarritoActualizado(prisma, carritoId);
-  const carrito = await prisma.carrito.findUnique({ where: { id: carritoId }, include: incluirItems });
-  return conSubtotal(carrito);
-}
-
-router.get("/carrito", verificarToken, asyncHandler(async (req, res) => {
-  res.json(conSubtotal(await obtenerOCrearCarrito(prisma, req.usuario.id)));
-async function obtenerOCrearCarrito(usuarioId) {
-  const carrito = await prisma.carrito.findFirst({
-    where: { usuarioId, estado: "activo" },
-    include: incluirItems,
-    orderBy: { id: "desc" },
-  });
-
-  if (carrito) return carrito;
-
-  return prisma.carrito.create({
-    data: { usuarioId, estado: "activo", canal: "web" },
-    include: incluirItems,
-  });
-}
 
 async function devolverCarritoActualizado(carritoId, tx = prisma) {
+  await marcarCarritoActualizado(tx, carritoId);
   const carrito = await tx.carrito.findUnique({ where: { id: carritoId }, include: incluirItems });
   return presentarCarrito(carrito, tx);
 }
@@ -66,7 +45,7 @@ async function bloquearCarritoActivo(tx, carritoId, usuarioId) {
 }
 
 router.get("/carrito", verificarToken, asyncHandler(async (req, res) => {
-  res.json(await presentarCarrito(await obtenerOCrearCarrito(req.usuario.id)));
+  res.json(await presentarCarrito(await obtenerOCrearCarrito(prisma, req.usuario.id)));
 }));
 
 router.post("/carrito/items", verificarToken, asyncHandler(async (req, res) => {
@@ -78,11 +57,7 @@ router.post("/carrito/items", verificarToken, asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "La variante y la cantidad deben ser números enteros positivos" });
   }
 
-  const carritoExistente = await prisma.carrito.findFirst({
-    where: { usuarioId: req.usuario.id, estado: "activo" },
-    include: incluirItems,
-    orderBy: { id: "desc" },
-  });
+  const carrito = await obtenerOCrearCarrito(prisma, req.usuario.id);
   const carrito = carritoExistente ?? await prisma.carrito.create({
     data: { usuarioId: req.usuario.id, estado: "activo", canal: "web" },
     include: incluirItems,
@@ -185,9 +160,6 @@ router.delete("/carrito/items/:id", verificarToken, asyncHandler(async (req, res
 
 router.delete("/carrito", verificarToken, asyncHandler(async (req, res) => {
   const carrito = await obtenerOCrearCarrito(prisma, req.usuario.id);
-  await prisma.itemCarrito.deleteMany({ where: { carritoId: carrito.id } });
-  res.json(await devolverCarritoActualizado(carrito.id));
-  const carrito = await obtenerOCrearCarrito(req.usuario.id);
   const resultado = await prisma.$transaction(async (tx) => {
     const activo = await bloquearCarritoActivo(tx, carrito.id, req.usuario.id);
     if (!activo) return { status: 409, message: "El carrito ya fue convertido; actualizá la página" };
