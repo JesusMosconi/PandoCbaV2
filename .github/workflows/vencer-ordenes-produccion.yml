@@ -1,0 +1,56 @@
+name: Vencer órdenes de producción
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vencer-ordenes-produccion
+  cancel-in-progress: false
+
+jobs:
+  vencer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtener código desplegado
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Validar destino de producción
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          node --input-type=module -e '
+            const valor = process.env.DATABASE_URL;
+            if (!valor) throw new Error("Falta PRODUCTION_DATABASE_URL");
+            const url = new URL(valor);
+            const hostsPermitidos = new Set([
+              "ep-raspy-breeze-aclw045d.sa-east-1.aws.neon.tech",
+              "ep-raspy-breeze-aclw045d-pooler.sa-east-1.aws.neon.tech",
+            ]);
+            if (!hostsPermitidos.has(url.hostname) || url.pathname !== "/neondb") {
+              throw new Error("La conexión no corresponde a la base de producción verificada");
+            }
+          '
+
+      - name: Instalar dependencias
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npm ci
+
+      - name: Vencer órdenes
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npm run vencer-ordenes
