@@ -78,10 +78,6 @@ router.post("/carrito/items", verificarToken, asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "La variante y la cantidad deben ser números enteros positivos" });
   }
 
-  const carrito = await obtenerOCrearCarrito(prisma, req.usuario.id);
-  const talleProducto = await prisma.talleProducto.findUnique({
-    where: { id: talleProductoId },
-    include: { producto: true },
   const carritoExistente = await prisma.carrito.findFirst({
     where: { usuarioId: req.usuario.id, estado: "activo" },
     include: incluirItems,
