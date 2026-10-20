@@ -58,10 +58,6 @@ router.post("/carrito/items", verificarToken, asyncHandler(async (req, res) => {
   }
 
   const carrito = await obtenerOCrearCarrito(prisma, req.usuario.id);
-  const carrito = carritoExistente ?? await prisma.carrito.create({
-    data: { usuarioId: req.usuario.id, estado: "activo", canal: "web" },
-    include: incluirItems,
-  });
 
   const resultado = await prisma.$transaction(async (tx) => {
     const activo = await bloquearCarritoActivo(tx, carrito.id, req.usuario.id);
