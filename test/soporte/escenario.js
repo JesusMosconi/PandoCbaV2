@@ -5,7 +5,9 @@ import prisma from "../../src/db.js";
 export function exigirBasePrueba() {
   const url = new URL(process.env.DATABASE_URL ?? "postgresql://invalid/invalid");
   assert.equal(url.hostname, "ep-floral-dust-acglee71-pooler.sa-east-1.aws.neon.tech");
-  assert.equal(url.pathname, "/neondb");
+  const base = process.env.PANDO_TEST_DATABASE ?? "neondb";
+  if (base !== "neondb") assert.match(base, /^codex_003_[a-z0-9_]+$/);
+  assert.equal(url.pathname, `/${base}`);
   assert.equal(process.env.PANDO_TEST_BRANCH_ID, "br-snowy-glitter-acxy36q0");
 }
 
@@ -56,6 +58,7 @@ export async function crearEscenario({ clientes = 1, stock = 4, precio = "120.50
     await prisma.itemCarrito.deleteMany({ where: { carritoId: { in: ids.carritos } } });
     await prisma.carrito.deleteMany({ where: { id: { in: ids.carritos } } });
     await prisma.talleProducto.delete({ where: { id: variante.id } });
+    await prisma.vigenciaPrecio.deleteMany({ where: { productoId: producto.id } });
     await prisma.producto.delete({ where: { id: producto.id } });
     await prisma.categoria.delete({ where: { id: categoria.id } });
     await prisma.talle.delete({ where: { id: talle.id } });

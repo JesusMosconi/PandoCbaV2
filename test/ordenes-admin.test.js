@@ -71,8 +71,9 @@ test("pago exactamente al vencer se rechaza y libera la reserva una sola vez", a
   const escenario = await crearEscenario();
   try {
     const orden = await crearOrden(escenario);
+    const [{ ahora }] = await escenario.prisma.$queryRaw`SELECT clock_timestamp() AS ahora`;
     await escenario.prisma.orden.update({ where: { id: orden.id }, data: {
-      venceEn: new Date(Date.now() - 1000),
+      venceEn: new Date(ahora.getTime() - 1000),
     } });
     const actor = escenario.usuarios[0].id;
     const primero = await confirmarPagoAdmin(orden.id, actor);
@@ -126,7 +127,7 @@ test("cancelar una pagada antes del consumo libera o consume según decisión ex
   }
 });
 
-test("cancelar después del consumo repone stock solo cuando se eligió restitución", async () => {
+test("después de la salida física se exige devolución y no se altera el stock", async () => {
   for (const restituir of [true, false]) {
     const escenario = await crearEscenario();
     try {
@@ -136,12 +137,10 @@ test("cancelar después del consumo repone stock solo cuando se eligió restituc
       await cambiarEstadoAdmin(orden.id, actor, "en_preparacion");
       await cambiarEstadoAdmin(orden.id, actor, "enviada", true);
       const cancelada = await cancelarOrdenAdmin(orden.id, actor, "Prueba", restituir);
-      const reiterada = await cancelarOrdenAdmin(orden.id, actor, "Prueba", restituir);
-      assert.equal(cancelada.status, 200);
-      assert.equal(reiterada.reiterada, true);
-      assert.equal(cancelada.orden.devolucion, "pendiente_de_gestionar");
+      assert.equal(cancelada.status, 409);
+      assert.equal(cancelada.codigo, "DEVOLUCION_REQUERIDA");
       assert.deepEqual(await estadoReserva(escenario, orden.id), {
-        reserva: "consumida", stock: restituir ? 4 : 3, eventos: 5,
+        reserva: "consumida", stock: 3, eventos: 4,
       });
     } finally { await escenario.limpiar(); }
   }

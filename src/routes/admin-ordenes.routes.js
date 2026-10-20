@@ -3,6 +3,10 @@ import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
+import { ErrorInventario } from "../services/inventario.js";
+import { validarCamposPermitidos } from "../utils/validate-compras.js";
+import { aceptarDevolucionCliente, cerrarSinReintegro, ErrorDevolucion,
+  recibirDevolucionCliente, registrarReintegro } from "../services/devoluciones.js";
 import {
   cancelarOrdenAdmin,
   cambiarEstadoAdmin,
@@ -28,8 +32,8 @@ function responder(resultado, res) {
   return res.status(resultado.status).set("Cache-Control", "no-store").json(
     resultado.status === 200 ? resultado.orden : {
       message: resultado.message,
-      codigo: resultado.status === 404 ? "ORDEN_NO_ENCONTRADA"
-        : resultado.status === 400 ? "ENTRADA_INVALIDA" : "TRANSICION_NO_PERMITIDA",
+      codigo: resultado.codigo ?? (resultado.status === 404 ? "ORDEN_NO_ENCONTRADA"
+        : resultado.status === 400 ? "ENTRADA_INVALIDA" : "TRANSICION_NO_PERMITIDA"),
       estadoActual: resultado.orden?.estado ?? null,
       orden: resultado.orden ?? null,
     },
@@ -84,5 +88,49 @@ router.post("/admin/ordenes/:id/cancelacion", asyncHandler(async (req, res) => {
   if (error) return res.status(400).json({ message: error });
   return responder(await cancelarOrdenAdmin(id, req.usuario.id, req.body.motivo, req.body.restituirStock), res);
 }));
+
+router.post("/admin/ordenes/:id/devoluciones", asyncHandler(async (req, res) => {
+  const id = idPositivo(req.params.id);
+  if (!id) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: "ID inválido" });
+  const error = validarCamposPermitidos(req.body, ["lineas", "motivo", "claveOperacion"]);
+  if (error) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: error });
+  res.set("Cache-Control", "no-store").json(await aceptarDevolucionCliente(id, req.body, req.usuario.id));
+}));
+
+router.post("/admin/ordenes/:id/devoluciones/:devolucionId/reintegros", asyncHandler(async (req, res) => {
+  const id = idPositivo(req.params.id);
+  const devolucionId = idPositivo(req.params.devolucionId);
+  if (!id || !devolucionId) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: "ID inválido" });
+  const error = validarCamposPermitidos(req.body, ["importeEfectivo", "claveOperacion"]);
+  if (error) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: error });
+  res.set("Cache-Control", "no-store").json(await registrarReintegro(id, devolucionId, req.body, req.usuario.id));
+}));
+
+router.post("/admin/ordenes/:id/devoluciones/:devolucionId/cierre-sin-reintegro", asyncHandler(async (req, res) => {
+  const id = idPositivo(req.params.id);
+  const devolucionId = idPositivo(req.params.devolucionId);
+  if (!id || !devolucionId) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: "ID inválido" });
+  const error = validarCamposPermitidos(req.body, ["motivo", "claveOperacion"]);
+  if (error) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: error });
+  res.set("Cache-Control", "no-store").json(await cerrarSinReintegro(id, devolucionId, req.body, req.usuario.id));
+}));
+
+router.post("/admin/ordenes/:id/devoluciones/:devolucionId/recepciones", asyncHandler(async (req, res) => {
+  const id = idPositivo(req.params.id);
+  const devolucionId = idPositivo(req.params.devolucionId);
+  if (!id || !devolucionId) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: "ID inválido" });
+  const error = validarCamposPermitidos(req.body, ["cantidadApta", "cantidadDanada", "claveOperacion"], ["motivo"]);
+  if (error) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: error });
+  res.set("Cache-Control", "no-store").json(await recibirDevolucionCliente(id, devolucionId, req.body, req.usuario.id));
+}));
+
+router.use((error, req, res, next) => {
+  if (error instanceof ErrorDevolucion) return res.status(error.status).set("Cache-Control", "no-store")
+    .json({ codigo: error.codigo, message: error.message,
+      ...(error.campos.length ? { campos: error.campos } : {}) });
+  if (!(error instanceof ErrorInventario)) return next(error);
+  return res.status(409).set("Cache-Control", "no-store")
+    .json({ codigo: error.codigo, message: error.message });
+});
 
 export default router;
