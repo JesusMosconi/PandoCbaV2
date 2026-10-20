@@ -2,26 +2,12 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
+import { incluirItems, marcarCarritoActualizado, obtenerOCrearCarrito } from "../utils/carrito.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esProductoVisible } from "../utils/visibilidad-producto.js";
 import { bloquearVariantes, disponibilidadVariantes } from "../services/inventario.js";
 
 const router = Router();
-const incluirItems = {
-  items: {
-    include: {
-      talleProducto: {
-        include: {
-          talle: true,
-          color: true,
-          producto: { include: { imagenes: { orderBy: { orden: "asc" }, take: 1 } } },
-        },
-      },
-      productoImprovisado: true,
-    },
-    orderBy: { id: "asc" },
-  },
-};
 
 async function presentarCarrito(carrito, tx = prisma) {
   const variantes = carrito.items.map((item) => item.talleProducto).filter(Boolean);
@@ -46,6 +32,14 @@ async function presentarCarrito(carrito, tx = prisma) {
   };
 }
 
+async function devolverCarritoActualizado(carritoId) {
+  await marcarCarritoActualizado(prisma, carritoId);
+  const carrito = await prisma.carrito.findUnique({ where: { id: carritoId }, include: incluirItems });
+  return conSubtotal(carrito);
+}
+
+router.get("/carrito", verificarToken, asyncHandler(async (req, res) => {
+  res.json(conSubtotal(await obtenerOCrearCarrito(prisma, req.usuario.id)));
 async function obtenerOCrearCarrito(usuarioId) {
   const carrito = await prisma.carrito.findFirst({
     where: { usuarioId, estado: "activo" },
@@ -84,6 +78,10 @@ router.post("/carrito/items", verificarToken, asyncHandler(async (req, res) => {
     return res.status(400).json({ message: "La variante y la cantidad deben ser números enteros positivos" });
   }
 
+  const carrito = await obtenerOCrearCarrito(prisma, req.usuario.id);
+  const talleProducto = await prisma.talleProducto.findUnique({
+    where: { id: talleProductoId },
+    include: { producto: true },
   const carritoExistente = await prisma.carrito.findFirst({
     where: { usuarioId: req.usuario.id, estado: "activo" },
     include: incluirItems,
@@ -132,11 +130,12 @@ router.put("/carrito/items/:id", verificarToken, asyncHandler(async (req, res) =
     return res.status(400).json({ message: "La cantidad debe ser un número entero positivo" });
   }
 
+  const carritoActual = await obtenerOCrearCarrito(prisma, req.usuario.id);
   const item = await prisma.itemCarrito.findUnique({
     where: { id: Number(req.params.id) },
     include: { carrito: true, talleProducto: true },
   });
-  if (!item || item.carrito.usuarioId !== req.usuario.id) {
+  if (!item || item.carrito.usuarioId !== req.usuario.id || item.carritoId !== carritoActual.id) {
     return res.status(404).json({ message: "Item de carrito no encontrado" });
   }
   const resultado = await prisma.$transaction(async (tx) => {
@@ -170,8 +169,9 @@ router.put("/carrito/items/:id", verificarToken, asyncHandler(async (req, res) =
 }));
 
 router.delete("/carrito/items/:id", verificarToken, asyncHandler(async (req, res) => {
+  const carritoActual = await obtenerOCrearCarrito(prisma, req.usuario.id);
   const item = await prisma.itemCarrito.findUnique({ where: { id: Number(req.params.id) }, include: { carrito: true } });
-  if (!item || item.carrito.usuarioId !== req.usuario.id) {
+  if (!item || item.carrito.usuarioId !== req.usuario.id || item.carritoId !== carritoActual.id) {
     return res.status(404).json({ message: "Item de carrito no encontrado" });
   }
 
@@ -188,6 +188,9 @@ router.delete("/carrito/items/:id", verificarToken, asyncHandler(async (req, res
 }));
 
 router.delete("/carrito", verificarToken, asyncHandler(async (req, res) => {
+  const carrito = await obtenerOCrearCarrito(prisma, req.usuario.id);
+  await prisma.itemCarrito.deleteMany({ where: { carritoId: carrito.id } });
+  res.json(await devolverCarritoActualizado(carrito.id));
   const carrito = await obtenerOCrearCarrito(req.usuario.id);
   const resultado = await prisma.$transaction(async (tx) => {
     const activo = await bloquearCarritoActivo(tx, carrito.id, req.usuario.id);
