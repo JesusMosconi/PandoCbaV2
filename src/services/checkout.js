@@ -253,7 +253,7 @@ export async function confirmarCheckout(usuarioId, entrada) {
         });
         await tx.carrito.update({ where: { id: carrito.id }, data: { estado: "convertido" } });
         return { orden: await tx.orden.findUnique({ where: { id: orden.id }, include: ordenConDetalle }), creada: true };
-      });
+      }, { timeout: 15_000 });
     } catch (error) {
       if (error instanceof ErrorPartidas) {
         throw new ErrorConfirmacionCheckout(409, error.codigo, error.message);
