@@ -328,7 +328,7 @@ export async function confirmarIngreso(id, { claveOperacion, resumenAceptado }, 
         data: { estado: "confirmado", claveOperacion, huellaSolicitud, confirmadoEn: ahora, confirmadoPorId: actorUsuarioId },
       });
       return { ...await obtenerIngreso(id, tx), reiterada: false };
-    });
+    }, { timeout: 15_000 });
   } catch (error) {
     if (error.code === "P2002") throw new ErrorCompra(409, "CLAVE_EN_CONFLICTO", "La clave de operación ya se usó en otro ingreso");
     throw error;
