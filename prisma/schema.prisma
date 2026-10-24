@@ -448,8 +448,9 @@ model ImgProducto {
 model CatalogoInicio {
   id         Int      @id @default(autoincrement())
   orden      Int
+  activo     Boolean  @default(true)
   producto   Producto @relation(fields: [productoId], references: [id])
-  productoId Int
+  productoId Int      @unique
 }
 
 model Carrito {
