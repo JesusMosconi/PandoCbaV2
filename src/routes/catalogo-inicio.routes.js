@@ -6,22 +6,60 @@ import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
 import { whereProductoVisible } from "../utils/visibilidad-producto.js";
 import { presentarVariantesConDisponibilidad } from "../services/inventario.js";
+import {
+  ErrorCatalogoInicio,
+  agregarSeleccion,
+  editarSeleccion,
+  listarSeleccionAdministrativa,
+  quitarSeleccion,
+  reemplazarSeleccion,
+} from "../services/catalogo-inicio.js";
 
 const router = Router();
 const requerirAdmin = [verificarToken, esAdmin];
 const requiredFields = { orden: "number", productoId: "number" };
 
-router.get("/catalogo-inicio", asyncHandler(async (req, res) => {
+function administrar(operacion) {
+  return asyncHandler(async (req, res) => {
+    try {
+      await operacion(req, res);
+    } catch (error) {
+      if (error instanceof ErrorCatalogoInicio) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      throw error;
+    }
+  });
+}
+
+function idRuta(req, res) {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(400).json({ message: "Identificador inválido" });
+    return null;
+  }
+  return id;
+}
+
+// La ruta administrativa debe preceder a /:id.
+router.get("/catalogo-inicio/seleccion", ...requerirAdmin, administrar(async (_req, res) => {
+  res.json(await listarSeleccionAdministrativa());
+}));
+
+router.put("/catalogo-inicio/seleccion", ...requerirAdmin, administrar(async (req, res) => {
+  const error = validateBody(req.body, {});
+  if (error) return res.status(400).json({ message: error });
+  res.json(await reemplazarSeleccion(req.body.productoIds));
+}));
+
+router.get("/catalogo-inicio", asyncHandler(async (_req, res) => {
   const catalogo = await prisma.catalogoInicio.findMany({
-    where: { producto: { is: whereProductoVisible } },
-    orderBy: { orden: "asc" },
+    where: { activo: true, producto: { is: whereProductoVisible } },
+    orderBy: [{ orden: "asc" }, { id: "asc" }],
     include: {
       producto: {
         select: {
-          id: true,
-          nombre: true,
-          precio: true,
-          descripcion: true,
+          id: true, nombre: true, precio: true, descripcion: true,
           imagenes: { orderBy: { orden: "asc" }, take: 1 },
           talles: { include: { talle: true, color: true } },
         },
@@ -42,15 +80,14 @@ router.get("/catalogo-inicio", asyncHandler(async (req, res) => {
 }));
 
 router.get("/catalogo-inicio/:id", asyncHandler(async (req, res) => {
+  const id = idRuta(req, res);
+  if (id === null) return;
   const item = await prisma.catalogoInicio.findFirst({
-    where: { id: Number(req.params.id), producto: { is: whereProductoVisible } },
+    where: { id, activo: true, producto: { is: whereProductoVisible } },
     include: {
       producto: {
         select: {
-          id: true,
-          nombre: true,
-          precio: true,
-          descripcion: true,
+          id: true, nombre: true, precio: true, descripcion: true,
           imagenes: { orderBy: { orden: "asc" }, take: 1 },
           talles: { include: { talle: true, color: true } },
         },
@@ -63,25 +100,26 @@ router.get("/catalogo-inicio/:id", asyncHandler(async (req, res) => {
   res.json({ ...item, producto: { ...item.producto, talles } });
 }));
 
-router.post("/catalogo-inicio", ...requerirAdmin, asyncHandler(async (req, res) => {
+router.post("/catalogo-inicio", ...requerirAdmin, administrar(async (req, res) => {
   const error = validateBody(req.body, requiredFields);
   if (error) return res.status(400).json({ message: error });
   const { orden, productoId } = req.body;
-  const item = await prisma.catalogoInicio.create({ data: { orden, productoId } });
-  res.json(item);
+  res.json(await agregarSeleccion({ orden, productoId }));
 }));
 
-router.put("/catalogo-inicio/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
+router.put("/catalogo-inicio/:id", ...requerirAdmin, administrar(async (req, res) => {
+  const id = idRuta(req, res);
+  if (id === null) return;
   const error = validateBody(req.body, requiredFields);
   if (error) return res.status(400).json({ message: error });
   const { orden, productoId } = req.body;
-  const item = await prisma.catalogoInicio.update({ where: { id: Number(req.params.id) }, data: { orden, productoId } });
-  res.json(item);
+  res.json(await editarSeleccion(id, { orden, productoId }));
 }));
 
-router.delete("/catalogo-inicio/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
-  const item = await prisma.catalogoInicio.delete({ where: { id: Number(req.params.id) } });
-  res.json(item);
+router.delete("/catalogo-inicio/:id", ...requerirAdmin, administrar(async (req, res) => {
+  const id = idRuta(req, res);
+  if (id === null) return;
+  res.json(await quitarSeleccion(id));
 }));
 
 export default router;
