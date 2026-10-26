@@ -7,7 +7,7 @@ export const incluirItems = {
         include: {
           talle: true,
           color: true,
-          producto: { include: { imagenes: { orderBy: { orden: "asc" }, take: 1 } } },
+          producto: { include: { coleccion: true, imagenes: { orderBy: { orden: "asc" }, take: 1 } } },
         },
       },
       productoImprovisado: true,

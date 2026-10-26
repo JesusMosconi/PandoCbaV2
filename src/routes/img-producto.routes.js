@@ -5,6 +5,8 @@ import { validateBody } from "../utils/validate.js";
 import { upload } from "../utils/upload.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
+import { whereProductoPublicado } from "../utils/visibilidad-producto.js";
+import { validarIdentificador } from "../utils/validate-compras.js";
 
 const router = Router();
 const requerirAdmin = [verificarToken, esAdmin];
@@ -35,7 +37,16 @@ router.post("/img-producto/upload", ...requerirAdmin, upload.array("imagenes", 1
   res.status(201).json(creadas);
 }));
 
-router.get("/img-producto/:productoId", asyncHandler(async (req, res) => {
+router.get("/img-producto/:productoId", (req, res, next) => {
+  if (req.query.admin !== "true") return next();
+  return verificarToken(req, res, () => esAdmin(req, res, next));
+}, asyncHandler(async (req, res) => {
+  if (validarIdentificador(req.params.productoId)) return res.status(400).json({ message: "Identificador inválido" });
+  const producto = await prisma.producto.findFirst({
+    where: { id: Number(req.params.productoId), ...(req.query.admin === "true" ? {} : whereProductoPublicado) },
+    select: { id: true },
+  });
+  if (!producto) return res.status(404).json({ message: "Producto no disponible" });
   const imagenes = await prisma.imgProducto.findMany({
     where: { productoId: Number(req.params.productoId) },
     orderBy: { orden: "asc" },

@@ -4,7 +4,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { incluirItems, marcarCarritoActualizado, obtenerOCrearCarrito } from "../utils/carrito.js";
 import { verificarToken } from "../middleware/auth.js";
-import { esProductoVisible } from "../utils/visibilidad-producto.js";
+import { esProductoPublicado } from "../utils/visibilidad-producto.js";
 import { bloquearVariantes, disponibilidadVariantes } from "../services/inventario.js";
 
 const router = Router();
@@ -20,7 +20,7 @@ async function presentarCarrito(carrito, tx = prisma) {
         ? { ...item.talleProducto, stockDisponible: disponibles.get(item.talleProductoId) ?? 0 }
         : null,
       disponible: item.talleProducto
-        ? esProductoVisible(item.talleProducto.producto)
+        ? esProductoPublicado(item.talleProducto.producto)
           && item.talleProducto.estado !== "inactivo"
           && (disponibles.get(item.talleProductoId) ?? 0) >= item.cantidad
         : Boolean(item.productoImprovisado),
@@ -64,9 +64,9 @@ router.post("/carrito/items", verificarToken, asyncHandler(async (req, res) => {
     if (!activo) return { status: 409, message: "El carrito ya fue convertido; actualizá la página" };
     await bloquearVariantes(tx, [talleProductoId]);
     const variante = await tx.talleProducto.findUnique({
-      where: { id: talleProductoId }, include: { producto: true },
+      where: { id: talleProductoId }, include: { producto: { include: { coleccion: true } } },
     });
-    if (!variante || variante.estado === "inactivo" || !esProductoVisible(variante.producto)) {
+    if (!variante || variante.estado === "inactivo" || !esProductoPublicado(variante.producto)) {
       return { status: 400, message: "La variante no está disponible" };
     }
     const disponible = (await disponibilidadVariantes(tx, [variante])).get(talleProductoId) ?? 0;
@@ -113,10 +113,10 @@ router.put("/carrito/items/:id", verificarToken, asyncHandler(async (req, res) =
     if (actual.talleProductoId) {
       await bloquearVariantes(tx, [actual.talleProductoId]);
       const variante = await tx.talleProducto.findUnique({
-        where: { id: actual.talleProductoId }, include: { producto: true },
+        where: { id: actual.talleProductoId }, include: { producto: { include: { coleccion: true } } },
       });
       if (cantidad > actual.cantidad && (!variante || variante.estado === "inactivo"
-        || !esProductoVisible(variante.producto))) {
+        || !esProductoPublicado(variante.producto))) {
         return { status: 400, message: "La variante no está disponible" };
       }
       if (variante) {

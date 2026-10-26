@@ -4,7 +4,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
-import { whereProductoVisible } from "../utils/visibilidad-producto.js";
+import { whereProductoPublicado } from "../utils/visibilidad-producto.js";
 import { presentarVariantesConDisponibilidad } from "../services/inventario.js";
 import {
   ErrorCatalogoInicio,
@@ -54,7 +54,7 @@ router.put("/catalogo-inicio/seleccion", ...requerirAdmin, administrar(async (re
 
 router.get("/catalogo-inicio", asyncHandler(async (_req, res) => {
   const catalogo = await prisma.catalogoInicio.findMany({
-    where: { activo: true, producto: { is: whereProductoVisible } },
+    where: { activo: true, producto: { is: whereProductoPublicado } },
     orderBy: [{ orden: "asc" }, { id: "asc" }],
     include: {
       producto: {
@@ -83,7 +83,7 @@ router.get("/catalogo-inicio/:id", asyncHandler(async (req, res) => {
   const id = idRuta(req, res);
   if (id === null) return;
   const item = await prisma.catalogoInicio.findFirst({
-    where: { id, activo: true, producto: { is: whereProductoVisible } },
+    where: { id, activo: true, producto: { is: whereProductoPublicado } },
     include: {
       producto: {
         select: {

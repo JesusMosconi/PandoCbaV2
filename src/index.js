@@ -22,6 +22,9 @@ import adminProveedoresRoutes from "./routes/admin-proveedores.routes.js";
 import adminComprasRoutes from "./routes/admin-compras.routes.js";
 import adminInventarioRoutes from "./routes/admin-inventario.routes.js";
 import adminInformesRoutes from "./routes/admin-informes.routes.js";
+import adminDropsRoutes from "./routes/admin-drops.routes.js";
+import dropsRoutes from "./routes/drops.routes.js";
+import { iniciarActivacionDrops } from "./jobs/activar-drops.js";
 
 const app = express();
 
@@ -52,6 +55,8 @@ app.use("/api", adminProveedoresRoutes);
 app.use("/api", adminComprasRoutes);
 app.use("/api", adminInventarioRoutes);
 app.use("/api", adminInformesRoutes);
+app.use("/api", adminDropsRoutes);
+app.use("/api", dropsRoutes);
 
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError || error?.message?.includes("no permitido")) {
@@ -68,4 +73,5 @@ app.use((error, req, res, next) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port);
+iniciarActivacionDrops();
 console.log("Server running on port", port);

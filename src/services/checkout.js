@@ -3,12 +3,13 @@ import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { bloquearVariantes, disponibilidadVariantes, horaBaseDatos } from "./inventario.js";
 import { ErrorPartidas, seleccionarPartidasFIFO } from "./partidas.js";
+import { esProductoPublicado } from "../utils/visibilidad-producto.js";
 
 const incluirCarrito = {
   items: {
     orderBy: { id: "asc" },
     include: {
-      talleProducto: { include: { producto: true, talle: true, color: true } },
+      talleProducto: { include: { producto: { include: { coleccion: true } }, talle: true, color: true } },
       productoImprovisado: true,
     },
   },
@@ -296,6 +297,7 @@ export async function resumenCheckout(usuarioId, entrada, tx = prisma, carritoDa
     if (!variante && !item.productoImprovisadoId) motivos.push("variante_inactiva");
     if (producto && !producto.activo) motivos.push("producto_retirado");
     if (producto && !producto.web) motivos.push("producto_no_publicado");
+    if (producto && !esProductoPublicado(producto) && producto.activo && producto.web) motivos.push("drop_no_lanzado");
     if (variante?.estado === "inactivo") motivos.push("variante_inactiva");
     if (variante && (cantidades.get(variante.id) ?? 0) > (disponibles.get(variante.id) ?? 0)) {
       motivos.push("stock_insuficiente");
