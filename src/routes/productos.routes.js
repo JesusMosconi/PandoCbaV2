@@ -4,7 +4,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
-import { whereProductoVisible } from "../utils/visibilidad-producto.js";
+import { whereProductoPublicado } from "../utils/visibilidad-producto.js";
 import { presentarVariantesConDisponibilidad } from "../services/inventario.js";
 import { actualizarVigenciaPrecio, registrarPrecioInicial } from "../services/precios.js";
 
@@ -21,7 +21,7 @@ router.get("/productos", (req, res, next) => {
   const esAdmin = admin === "true";
   const productos = await prisma.producto.findMany({
     where: {
-      ...(esAdmin ? {} : whereProductoVisible),
+      ...(esAdmin ? {} : whereProductoPublicado),
       categoriaId: categoriaId ? Number(categoriaId) : undefined,
       coleccionId: coleccionId ? Number(coleccionId) : undefined,
       ...(esAdmin && web === "true" ? { web: true } : {}),
@@ -50,7 +50,7 @@ router.get("/productos", (req, res, next) => {
 
 router.get("/productos/:id", asyncHandler(async (req, res) => {
   const producto = await prisma.producto.findFirst({
-    where: { id: Number(req.params.id), ...whereProductoVisible },
+    where: { id: Number(req.params.id), ...whereProductoPublicado },
     include: {
       categoria: true,
       coleccion: true,

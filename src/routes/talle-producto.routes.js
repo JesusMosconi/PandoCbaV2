@@ -4,6 +4,8 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
+import { whereProductoPublicado } from "../utils/visibilidad-producto.js";
+import { validarIdentificador } from "../utils/validate-compras.js";
 import {
   bloquearVariantes,
   compromisosEfectivos,
@@ -25,8 +27,12 @@ const requiredFields = {
 
 router.get("/talle-producto", asyncHandler(async (req, res) => {
   const { productoId } = req.query;
+  if (productoId !== undefined && validarIdentificador(productoId)) {
+    return res.status(400).json({ message: "Identificador inválido" });
+  }
   const variantes = await prisma.talleProducto.findMany({
-    where: { productoId: productoId ? Number(productoId) : undefined },
+    where: { productoId: productoId ? Number(productoId) : undefined,
+      producto: { is: whereProductoPublicado } },
     include: { talle: true, color: true },
     orderBy: { id: "asc" },
   });
