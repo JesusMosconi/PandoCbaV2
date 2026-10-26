@@ -4,6 +4,10 @@ import jwt from "jsonwebtoken";
 import prisma from "../db.js";
 import { verificarToken } from "../middleware/auth.js";
 import { esAdmin } from "../middleware/es-admin.js";
+import { asyncHandler } from "../utils/async-handler.js";
+import { validateBody } from "../utils/validate.js";
+import { normalizarEmail } from "../utils/email.js";
+import { notificarBienvenida, notificarCambioPassword } from "../services/notificaciones.js";
 
 const router = Router();
 
@@ -21,28 +25,62 @@ const generarToken = (usuario) =>
     { expiresIn: process.env.JWT_EXPIRES_IN || "12h" }
   );
 
-router.post("/usuarios/registro", async (req, res) => {
-  try {
-    const { nombre, apellido, email, password, telefono } = req.body;
-    if (!nombre || !apellido || !email || !password) {
-      return res.status(400).json({ message: "nombre, apellido, email y password son requeridos" });
-    }
-    if (password.length < 6) {
-      return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres" });
-    }
-    const existente = await prisma.usuario.findUnique({ where: { email } });
-    if (existente) {
-      return res.status(409).json({ message: "El email ya está registrado" });
-    }
-    const usuario = await prisma.usuario.create({
-      data: { nombre, apellido, email, password: await bcrypt.hash(password, 10), telefono },
-    });
-    return res.status(201).json({ usuario: sanitizarUsuario(usuario), token: generarToken(usuario) });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Error al registrar usuario" });
+router.post("/usuarios/registro", asyncHandler(async (req, res) => {
+  const { nombre, apellido, email, password, telefono } = req.body ?? {};
+  if (!nombre || !apellido || !email || !password) {
+    return res.status(400).json({ message: "nombre, apellido, email y password son requeridos" });
   }
-});
+  const errorTipos = validateBody(
+    req.body,
+    { nombre: "string", apellido: "string", email: "string", password: "string" },
+    { telefono: "string" },
+  );
+  if (errorTipos) return res.status(400).json({ message: errorTipos });
+
+  const emailNormalizado = normalizarEmail(email);
+  if (!emailNormalizado) {
+    return res.status(400).json({ message: "Ingresá un correo electrónico válido" });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres" });
+  }
+  const existente = await prisma.usuario.findFirst({
+    where: { email: { equals: emailNormalizado, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (existente) {
+    return res.status(409).json({ message: "El email ya está registrado" });
+  }
+
+  let usuario;
+  try {
+    usuario = await prisma.usuario.create({
+      data: {
+        nombre,
+        apellido,
+        email: emailNormalizado,
+        password: await bcrypt.hash(password, 10),
+        telefono,
+      },
+    });
+  } catch (error) {
+    if (error.code === "P2002") return res.status(409).json({ message: "El email ya está registrado" });
+    throw error;
+  }
+
+  res.status(201).json({ usuario: sanitizarUsuario(usuario), token: generarToken(usuario) });
+  void notificarBienvenida(usuario);
+}));
+
+// Busca primero el correo normalizado y después el valor recibido, para cuentas anteriores con mayúsculas.
+const buscarUsuarioParaLogin = async (email) => {
+  const emailNormalizado = normalizarEmail(email);
+  const usuario = emailNormalizado
+    ? await prisma.usuario.findUnique({ where: { email: emailNormalizado } })
+    : null;
+  if (usuario || typeof email !== "string" || email === emailNormalizado) return usuario;
+  return prisma.usuario.findUnique({ where: { email } });
+};
 
 router.post("/usuarios/login", async (req, res) => {
   try {
@@ -50,7 +88,7 @@ router.post("/usuarios/login", async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ message: "email y password son requeridos" });
     }
-    const usuario = await prisma.usuario.findUnique({ where: { email } });
+    const usuario = await buscarUsuarioParaLogin(email);
     if (!usuario || !usuario.activo || !(await bcrypt.compare(password, usuario.password))) {
       return res.status(401).json({ message: "Credenciales inválidas" });
     }
@@ -88,27 +126,23 @@ router.put("/usuarios/perfil", verificarToken, async (req, res) => {
   }
 });
 
-router.put("/usuarios/cambiar-password", verificarToken, async (req, res) => {
-  try {
-    const { passwordActual, passwordNuevo } = req.body;
-    if (!passwordActual || !passwordNuevo) {
-      return res.status(400).json({ message: "passwordActual y passwordNuevo son requeridos" });
-    }
-    if (passwordNuevo.length < 6) {
-      return res.status(400).json({ message: "La nueva contraseña debe tener al menos 6 caracteres" });
-    }
-    const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id } });
-    if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
-    if (!(await bcrypt.compare(passwordActual, usuario.password))) {
-      return res.status(401).json({ message: "La contraseña actual es incorrecta" });
-    }
-    await prisma.usuario.update({ where: { id: req.usuario.id }, data: { password: await bcrypt.hash(passwordNuevo, 10) } });
-    return res.json({ message: "Contraseña actualizada correctamente" });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Error al cambiar contraseña" });
+router.put("/usuarios/cambiar-password", verificarToken, asyncHandler(async (req, res) => {
+  const { passwordActual, passwordNuevo } = req.body ?? {};
+  if (!passwordActual || !passwordNuevo) {
+    return res.status(400).json({ message: "passwordActual y passwordNuevo son requeridos" });
   }
-});
+  if (passwordNuevo.length < 6) {
+    return res.status(400).json({ message: "La nueva contraseña debe tener al menos 6 caracteres" });
+  }
+  const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id } });
+  if (!usuario) return res.status(404).json({ message: "Usuario no encontrado" });
+  if (!(await bcrypt.compare(passwordActual, usuario.password))) {
+    return res.status(401).json({ message: "La contraseña actual es incorrecta" });
+  }
+  await prisma.usuario.update({ where: { id: req.usuario.id }, data: { password: await bcrypt.hash(passwordNuevo, 10) } });
+  res.json({ message: "Contraseña actualizada correctamente" });
+  void notificarCambioPassword(usuario, new Date());
+}));
 
 router.get("/admin/usuarios", verificarToken, esAdmin, async (req, res) => {
   try {
