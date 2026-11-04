@@ -2,13 +2,24 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import prisma from "../../src/db.js";
 
+// Bases Neon donde los tests pueden escribir. La clave es el endpoint (con o sin
+// "-pooler") y el valor es lo que debe valer PANDO_TEST_BRANCH_ID para confirmar.
+// ep-fancy-queen no tiene el ID de rama registrado: se confirma con su endpoint.
+const BASES_PRUEBA = {
+  "ep-floral-dust-acglee71": "br-snowy-glitter-acxy36q0",
+  "ep-fancy-queen-acudbg1e": "ep-fancy-queen-acudbg1e",
+};
+
 export function exigirBasePrueba() {
   const url = new URL(process.env.DATABASE_URL ?? "postgresql://invalid/invalid");
-  assert.equal(url.hostname, "ep-floral-dust-acglee71-pooler.sa-east-1.aws.neon.tech");
+  const [endpoint, ...dominio] = url.hostname.split(".");
+  assert.equal(dominio.join("."), "sa-east-1.aws.neon.tech");
+  const confirmacion = BASES_PRUEBA[endpoint.replace(/-pooler$/, "")];
+  assert.ok(confirmacion, `La base ${url.hostname} no es una base de prueba conocida`);
   const base = process.env.PANDO_TEST_DATABASE ?? "neondb";
   if (base !== "neondb") assert.match(base, /^codex_003_[a-z0-9_]+$/);
   assert.equal(url.pathname, `/${base}`);
-  assert.equal(process.env.PANDO_TEST_BRANCH_ID, "br-snowy-glitter-acxy36q0");
+  assert.equal(process.env.PANDO_TEST_BRANCH_ID, confirmacion);
 }
 
 export async function crearEscenario({ clientes = 1, stock = 4, precio = "120.50" } = {}) {

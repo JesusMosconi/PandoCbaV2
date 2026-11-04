@@ -75,9 +75,16 @@ function resumir(eventos) {
   advertenciaCobertura: coberturaDesconocida ? "Hay unidades sin costo histórico conocido" : null };
 }
 
-/** Todos los hechos se fechan por su propio evento; no reescribe ventas de períodos anteriores. */
+// Hechos que pertenecen a un canal de venta; compras, correcciones y movimientos no.
+const tiposConCanal = new Set(["venta", "devolucion_cliente", "reintegro"]);
+
+/**
+ * Todos los hechos se fechan por su propio evento; no reescribe ventas de períodos anteriores.
+ * Con `canal` ("web" o "local") solo incluye ventas, devoluciones y reintegros de ese canal.
+ */
 export async function informeComprasVentas(filtros) {
   const { inicio, fin } = limites(filtros.desde, filtros.hasta);
+  const porCanal = filtros.canal ? { orden: { canal: filtros.canal } } : {};
   const fechaCompra = { gte: new Date(`${filtros.desde}T00:00:00.000Z`),
     lte: new Date(`${filtros.hasta}T00:00:00.000Z`) };
   const [ingresos, ordenes, devoluciones, pagos, correcciones, proveedorDevuelto, movimientos,
@@ -88,20 +95,22 @@ export async function informeComprasVentas(filtros) {
       lineas: { include: { variante: { select: { productoId: true } } } },
       gastosAdicionales: true,
     } }),
-    prisma.orden.findMany({ where: { pagoConfirmadoEn: { gte: inicio, lt: fin } }, include: {
+    prisma.orden.findMany({ where: { pagoConfirmadoEn: { gte: inicio, lt: fin },
+      ...(filtros.canal ? { canal: filtros.canal } : {}) }, include: {
       detalles: { orderBy: { posicion: "asc" }, include: { asignacionesPartida: {
         where: { estado: { in: ["vendida", "revertida"] } },
         include: { partida: { include: { ingreso: { select: { proveedorId: true } } } },
           variante: { select: { productoId: true } } }, orderBy: { id: "asc" },
       } } },
     } }),
-    prisma.devolucionCliente.findMany({ where: { aceptadaEn: { gte: inicio, lt: fin } }, include: {
+    prisma.devolucionCliente.findMany({ where: { aceptadaEn: { gte: inicio, lt: fin }, ...porCanal }, include: {
       asignaciones: { include: { asignacion: { include: {
         partida: { include: { ingreso: { select: { proveedorId: true } } } },
         variante: { select: { productoId: true } },
       } } }, orderBy: { asignacionId: "asc" } },
     } }),
-    prisma.pagoReintegro.findMany({ where: { fecha: { lt: fin } }, include: {
+    prisma.pagoReintegro.findMany({ where: { fecha: { lt: fin },
+      ...(filtros.canal ? { devolucion: porCanal } : {}) }, include: {
       devolucion: { include: { asignaciones: { include: { asignacion: { include: {
         partida: { include: { ingreso: { select: { proveedorId: true } } } },
         variante: { select: { productoId: true } },
@@ -131,7 +140,7 @@ export async function informeComprasVentas(filtros) {
     )
     SELECT c."partidaId", i."proveedorId" FROM cadena c
     JOIN "Ingreso" i ON i."id" = c."ingresoId"`,
-    prisma.devolucionCliente.findMany({ where: { aceptadaEn: { lt: fin } }, include: {
+    prisma.devolucionCliente.findMany({ where: { aceptadaEn: { lt: fin }, ...porCanal }, include: {
       pagos: { where: { fecha: { lt: fin } }, orderBy: [{ fecha: "asc" }, { id: "asc" }] },
       asignaciones: { include: { asignacion: { include: {
         partida: { include: { ingreso: { select: { proveedorId: true } } } },
@@ -143,6 +152,7 @@ export async function informeComprasVentas(filtros) {
   const eventos = [];
   let origenDesconocido = 0n;
   function agregar(evento, origen) {
+    if (filtros.canal && !tiposConCanal.has(evento.tipo)) return;
     if (coincide(filtros, origen)) eventos.push(evento);
     if (evento.tipo === "venta" && origen.proveedorId === null
       && coincide({ ...filtros, proveedorId: undefined }, origen)) {
@@ -172,7 +182,7 @@ export async function informeComprasVentas(filtros) {
     if (orden.detalles.length === 0) {
       const origen = { productoId: null, varianteId: null, proveedorId: null };
       agregar(nuevoEvento("venta", `sin-detalle:${orden.id}`, orden.pagoConfirmadoEn, origen, {
-        ordenId: orden.id, cantidad: 0, importeVentaAtribuido: orden.subtotal.toFixed(2),
+        ordenId: orden.id, canal: orden.canal, cantidad: 0, importeVentaAtribuido: orden.subtotal.toFixed(2),
         costoVendidoConocido: cero, unidadesCostoDesconocido: 0, costoDesconocido: true,
       }), origen);
       continue;
@@ -191,7 +201,7 @@ export async function informeComprasVentas(filtros) {
         const costo = asignacion.costoUnitarioAlPago === null ? null
           : importeDecimal(centavosSeguro(asignacion.costoUnitarioAlPago) * BigInt(asignacion.cantidad));
         agregar(nuevoEvento("venta", asignacion.id, orden.pagoConfirmadoEn, origen, {
-          ordenId: orden.id, cantidad: asignacion.cantidad,
+          ordenId: orden.id, canal: orden.canal, cantidad: asignacion.cantidad,
           importeVentaAtribuido: importe, costoVendidoConocido: costo ?? cero,
           unidadesCostoDesconocido: costo === null ? asignacion.cantidad : 0,
           costoDesconocido: costo === null,
@@ -205,7 +215,7 @@ export async function informeComprasVentas(filtros) {
         const origen = { productoId: detalle.productoId, varianteId: detalle.talleProductoId,
           proveedorId: null };
         agregar(nuevoEvento("venta", `sin-origen:${detalle.id}`, orden.pagoConfirmadoEn, origen, {
-          ordenId: orden.id, cantidad: detalle.cantidad - asignadas,
+          ordenId: orden.id, canal: orden.canal, cantidad: detalle.cantidad - asignadas,
           importeVentaAtribuido: importeDecimal(faltante), costoVendidoConocido: cero,
           unidadesCostoDesconocido: detalle.cantidad - asignadas, costoDesconocido: true,
         }), origen);

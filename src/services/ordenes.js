@@ -184,12 +184,24 @@ const incluirOrdenAdmin = {
 };
 
 function presentarOrdenAdmin(orden, ahora) {
+  const presentada = presentarOrden(orden, ahora, { incluirEventos: true });
+  // Las ventas del local no se atribuyen a una persona: se ocultan el operador y los actores.
+  const local = orden.canal === "local";
   return {
-    ...presentarOrden(orden, ahora, { incluirEventos: true }),
-    cliente: orden.usuario,
+    ...presentada,
+    ...(local ? {
+      usuarioId: null,
+      eventos: presentada.eventos.map((evento) => ({ ...evento, actorUsuarioId: null })),
+    } : {}),
+    canal: orden.canal,
+    metodoPago: orden.metodoPago,
+    numeroComprobante: orden.numeroComprobante,
+    nombreCliente: orden.nombreCliente,
+    telefonoCliente: orden.telefonoCliente,
+    cliente: local ? null : orden.usuario,
     motivoCancelacion: orden.motivoCancelacion,
     restituirStock: orden.restituirStock,
-    pagoConfirmadoPorId: orden.pagoConfirmadoPorId,
+    pagoConfirmadoPorId: local ? null : orden.pagoConfirmadoPorId,
     envioCoordinadoPorId: orden.envioCoordinadoPorId,
     devolucionesCliente: (orden.devolucionesCliente ?? []).map((devolucion) => {
       const importeReintegradoAcumulado = devolucion.pagos.reduce((total, pago) =>
@@ -221,10 +233,12 @@ function presentarOrdenAdmin(orden, ahora) {
   };
 }
 
-export async function listarOrdenesAdmin({ estado, tipoEntrega, pagina = 1, limite = 20 } = {}) {
+export async function listarOrdenesAdmin({ estado, tipoEntrega, canal, metodoPago, pagina = 1, limite = 20 } = {}) {
   const where = {
     ...(estado ? { estado } : {}),
     ...(tipoEntrega ? { tipoEntrega } : {}),
+    ...(canal ? { canal } : {}),
+    ...(metodoPago ? { metodoPago } : {}),
   };
   const [ahora, total, ordenes] = await Promise.all([
     horaBaseDatos(prisma),

@@ -16,7 +16,7 @@ const sanitizarUsuario = (usuario) => {
   return resto;
 };
 
-const rolesValidos = ["cliente", "admin"];
+const rolesValidos = ["cliente", "admin", "vendedor"];
 
 const generarToken = (usuario) =>
   jwt.sign(
@@ -199,35 +199,41 @@ router.get("/admin/usuarios/:id", verificarToken, esAdmin, async (req, res) => {
   }
 });
 
-router.patch("/admin/usuarios/:id/estado", verificarToken, esAdmin, async (req, res) => {
+// El índice parcial "Usuario_vendedor_activo_unico" admite un solo vendedor activo.
+function respuestaErrorUsuario(error, res) {
+  if (error.code === "P2025") return res.status(404).json({ message: "Usuario no encontrado" });
+  if (error.code === "P2002") {
+    return res.status(409).json({ codigo: "VENDEDOR_EXISTENTE",
+      message: "Ya hay un vendedor activo. Desactivalo o cambiale el rol antes de asignar otro." });
+  }
+  throw error;
+}
+
+router.patch("/admin/usuarios/:id/estado", verificarToken, esAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Id de usuario inválido" });
+  if (typeof req.body.activo !== "boolean") return res.status(400).json({ message: "El estado debe ser booleano" });
+  if (id === req.usuario.id && !req.body.activo) return res.status(400).json({ message: "No podés desactivar tu propio usuario" });
   try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: "Id de usuario inválido" });
-    if (typeof req.body.activo !== "boolean") return res.status(400).json({ message: "El estado debe ser booleano" });
-    if (id === req.usuario.id && !req.body.activo) return res.status(400).json({ message: "No podés desactivar tu propio usuario" });
     const usuario = await prisma.usuario.update({ where: { id }, data: { activo: req.body.activo }, select: { id: true, nombre: true, apellido: true, email: true, telefono: true, fechaCreado: true, rol: true, activo: true } });
     return res.json(usuario);
   } catch (error) {
-    if (error.code === "P2025") return res.status(404).json({ message: "Usuario no encontrado" });
-    console.error(error);
-    return res.status(500).json({ message: "Error al actualizar estado" });
+    return respuestaErrorUsuario(error, res);
   }
-});
+}));
 
-router.put("/admin/usuarios/:id/rol", verificarToken, esAdmin, async (req, res) => {
+router.put("/admin/usuarios/:id/rol", verificarToken, esAdmin, asyncHandler(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rol } = req.body;
+  if (!Number.isInteger(id)) return res.status(400).json({ message: "Id de usuario inválido" });
+  if (!rolesValidos.includes(rol)) return res.status(400).json({ message: "Rol inválido" });
+  if (id === req.usuario.id && rol !== "admin") return res.status(400).json({ message: "No podés quitarte el rol administrador" });
   try {
-    const id = Number(req.params.id);
-    const { rol } = req.body;
-    if (!Number.isInteger(id)) return res.status(400).json({ message: "Id de usuario inválido" });
-    if (!rolesValidos.includes(rol)) return res.status(400).json({ message: "Rol inválido" });
-    if (id === req.usuario.id && rol !== "admin") return res.status(400).json({ message: "No podés quitarte el rol administrador" });
     const usuario = await prisma.usuario.update({ where: { id }, data: { rol } });
     return res.json(sanitizarUsuario(usuario));
   } catch (error) {
-    if (error.code === "P2025") return res.status(404).json({ message: "Usuario no encontrado" });
-    console.error(error);
-    return res.status(500).json({ message: "Error al actualizar rol" });
+    return respuestaErrorUsuario(error, res);
   }
-});
+}));
 
 export default router;

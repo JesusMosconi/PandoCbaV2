@@ -18,7 +18,7 @@ export const incluirItems = {
 
 export async function obtenerOCrearCarrito(prisma, usuarioId, ahora = new Date()) {
   const carrito = await prisma.carrito.findFirst({
-    where: { usuarioId, estado: "activo" },
+    where: { usuarioId, estado: "activo", canal: "web" },
     include: incluirItems,
     orderBy: { id: "desc" },
   });

@@ -14,6 +14,12 @@ function filtros(req) {
     throw new ErrorInforme(400, "FILTROS_INVALIDOS", "Indicá un período válido");
   }
   const resultado = { desde, hasta };
+  if (req.query.canal !== undefined && req.query.canal !== "") {
+    if (!["web", "local"].includes(req.query.canal)) {
+      throw new ErrorInforme(400, "FILTROS_INVALIDOS", "El canal debe ser web o local");
+    }
+    resultado.canal = req.query.canal;
+  }
   for (const campo of ["productoId", "varianteId", "proveedorId", "pagina", "limite"]) {
     if (req.query[campo] === undefined) continue;
     if (validarIdentificador(req.query[campo], campo)) {
