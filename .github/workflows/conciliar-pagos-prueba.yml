@@ -1,0 +1,36 @@
+name: Conciliar pagos de tesis (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conciliar-pagos-tesis
+  cancel-in-progress: false
+
+jobs:
+  conciliar:
+    if: vars.PAGOS_TESIS_JOB_HABILITADO == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: tesis-pagos
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL_TESIS }}
+      PANDO_TEST_BRANCH_ID: br-holy-flower-achmzkpy
+      PAGOS_ENTORNO: prueba
+      PAGOS_ONLINE_HABILITADOS: 'true'
+      MP_ACCESS_TOKEN_PRUEBA: ${{ secrets.MP_ACCESS_TOKEN_PRUEBA }}
+      MP_USUARIO_PRUEBA_ID: '3801948316'
+      MP_APLICACION_PRUEBA_ID: '2147091673612411'
+      MP_URL_RETORNO: ${{ vars.MP_URL_RETORNO_TESIS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node node_modules/prisma/build/index.js generate --config scripts/prisma-tesis.config.ts
+      - run: npm run conciliar-pagos

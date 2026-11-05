@@ -429,6 +429,8 @@ model PagoReintegro {
   devolucionId       Int
   importeEfectivo    Decimal           @db.Decimal(14, 2)
   claveOperacion     String            @unique
+  referenciaExterna  String?
+  comprobadoEn       DateTime?         @db.Timestamptz(3)
   actorUsuarioId     Int
   fecha              DateTime          @default(now()) @db.Timestamptz(3)
 
@@ -510,6 +512,9 @@ model Orden {
   costoEnvio   Decimal?
   total        Decimal?
   metodoPago   String
+  esDemostracion Boolean @default(false)
+  domicilioRevisadoEn DateTime? @db.Timestamptz(3)
+  domicilioRevisadoPorId Int?
   fechaCreado  DateTime       @default(now())
   creadaEn     DateTime?      @db.Timestamptz(3)
   venceEn      DateTime?      @db.Timestamptz(3)
@@ -532,10 +537,75 @@ model Orden {
   reservas     ReservaStock[]
   eventos      EventoOrden[]
   devolucionesCliente DevolucionCliente[]
+  intentosPago IntentoPago[]
+  incidenciasPago IncidenciaPago[]
+  reintegrosPago ReintegroPago[]
 
   @@unique([usuarioId, claveConfirmacion])
   @@index([usuarioId, creadaEn])
   @@index([estado, venceEn])
+}
+
+model IntentoPago {
+  id                  Int       @id @default(autoincrement())
+  ordenId             Int
+  orden               Orden     @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+  proveedor           String    @default("mercado_pago")
+  claveIdempotencia   String    @unique
+  referenciaExterna   String?   @unique
+  importe             Decimal   @db.Decimal(14, 2)
+  moneda              String    @default("ARS")
+  estado              String    @default("preparado")
+  urlCheckout         String?
+  creadoEn            DateTime  @default(now()) @db.Timestamptz(3)
+  actualizadoEn       DateTime  @updatedAt @db.Timestamptz(3)
+  ultimoChequeoEn     DateTime? @db.Timestamptz(3)
+  incidencias         IncidenciaPago[]
+
+  @@index([ordenId, creadoEn])
+  @@index([estado, ultimoChequeoEn])
+}
+
+model IncidenciaPago {
+  id                  Int       @id @default(autoincrement())
+  ordenId             Int
+  orden               Orden     @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+  intentoId           Int?
+  intento             IntentoPago? @relation(fields: [intentoId], references: [id], onDelete: Restrict)
+  claveHallazgo       String    @unique
+  referenciaExterna   String?
+  tipo                String
+  importe             Decimal?  @db.Decimal(14, 2)
+  moneda              String    @default("ARS")
+  estado              String    @default("abierta")
+  detectadaEn         DateTime  @default(now()) @db.Timestamptz(3)
+  resueltaEn          DateTime? @db.Timestamptz(3)
+  actorUsuarioId      Int?
+  resolucion          String?
+  reintegros          ReintegroPago[]
+
+  @@index([ordenId, estado])
+}
+
+model ReintegroPago {
+  id                  Int       @id @default(autoincrement())
+  ordenId             Int
+  orden               Orden     @relation(fields: [ordenId], references: [id], onDelete: Restrict)
+  incidenciaId        Int?
+  incidencia          IncidenciaPago? @relation(fields: [incidenciaId], references: [id], onDelete: Restrict)
+  claveOperacion      String    @unique
+  concepto            String
+  importeDebido       Decimal   @db.Decimal(14, 2)
+  importeReintegrado  Decimal   @default(0) @db.Decimal(14, 2)
+  estado              String    @default("pendiente")
+  referenciaExterna   String?   @unique
+  metodo              String?
+  motivo              String?
+  actorUsuarioId      Int?
+  creadoEn            DateTime  @default(now()) @db.Timestamptz(3)
+  comprobadoEn        DateTime? @db.Timestamptz(3)
+
+  @@index([ordenId, estado])
 }
 
 model DetalleOrden {

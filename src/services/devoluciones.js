@@ -286,7 +286,7 @@ function validarReferenciaDevolucion(ordenId, devolucionId, actorUsuarioId) {
 /** Cada pago reduce el saldo una vez, sin modificar la aceptación ni su costo revertido. */
 export async function registrarReintegro(ordenId, devolucionId, entrada, actorUsuarioId) {
   const campos = validarReferenciaDevolucion(ordenId, devolucionId, actorUsuarioId);
-  if (validarCamposPermitidos(entrada, ["importeEfectivo", "claveOperacion"])) campos.push("entrada");
+  if (validarCamposPermitidos(entrada, ["importeEfectivo", "claveOperacion"], ["referenciaExterna", "constanciaExaminada"])) campos.push("entrada");
   if (validarImporte(entrada?.importeEfectivo) || entrada.importeEfectivo === "0"
     || centavos(entrada.importeEfectivo) === 0n) campos.push("importeEfectivo");
   if (!validarClaveOperacion(entrada?.claveOperacion)) campos.push("claveOperacion");
@@ -295,6 +295,30 @@ export async function registrarReintegro(ordenId, devolucionId, entrada, actorUs
   const claveOperacion = entrada.claveOperacion.trim();
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${claveOperacion})) IS NULL AS locked`;
+    await tx.$queryRaw`SELECT "id" FROM "Orden" WHERE "id" = ${ordenId} FOR UPDATE`;
+    const ordenPago = await tx.orden.findUnique({ where: { id: ordenId } });
+    if (ordenPago?.metodoPago === "mercado_pago") {
+      if (!ordenPago.esDemostracion || typeof entrada.referenciaExterna !== "string"
+        || !/^SIM-[A-Za-z0-9_-]{4,100}$/.test(entrada.referenciaExterna)
+        || entrada.constanciaExaminada !== true) {
+        throw new ErrorDevolucion(400, "CONSTANCIA_REQUERIDA", "El reintegro de prueba exige una constancia SIM- examinada por administración");
+      }
+      const cobrados = await tx.intentoPago.aggregate({ where: { ordenId, estado: "aprobado" }, _sum: { importe: true } });
+      const productos = await tx.pagoReintegro.aggregate({ where: { devolucion: { ordenId } }, _sum: { importeEfectivo: true } });
+      const otros = await tx.reintegroPago.aggregate({ where: { ordenId }, _sum: { importeReintegrado: true } });
+      const restante = (cobrados._sum.importe ?? 0).sub(productos._sum.importeEfectivo ?? 0).sub(otros._sum.importeReintegrado ?? 0);
+      // El reintento de una clave ya aplicada se comprueba después sin duplicar el importe.
+      const yaRegistrado = await tx.pagoReintegro.findUnique({ where: { claveOperacion } });
+      if (!yaRegistrado) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${entrada.referenciaExterna})) IS NULL AS locked`;
+        if (await tx.pagoReintegro.count({ where: { referenciaExterna: entrada.referenciaExterna } })) {
+          throw new ErrorDevolucion(409, "CONSTANCIA_REUTILIZADA", "La constancia ya corresponde a otro reintegro");
+        }
+      }
+      if (!yaRegistrado && centavos(importeEfectivo) > centavos(restante.toFixed(2))) {
+        throw new ErrorDevolucion(409, "REINTEGRO_EXCEDIDO", "El reintegro supera el importe cobrado pendiente");
+      }
+    }
     await tx.$queryRaw`SELECT "id" FROM "DevolucionCliente" WHERE "id" = ${devolucionId} FOR UPDATE`;
     const devolucion = await tx.devolucionCliente.findUnique({ where: { id: devolucionId } });
     if (!devolucion || devolucion.ordenId !== ordenId) {
@@ -302,7 +326,8 @@ export async function registrarReintegro(ordenId, devolucionId, entrada, actorUs
     }
     const previo = await tx.pagoReintegro.findUnique({ where: { claveOperacion } });
     if (previo) {
-      if (previo.devolucionId !== devolucionId || previo.importeEfectivo.toFixed(2) !== importeEfectivo) {
+      if (previo.devolucionId !== devolucionId || previo.importeEfectivo.toFixed(2) !== importeEfectivo
+        || (ordenPago?.metodoPago === "mercado_pago" && previo.referenciaExterna !== entrada.referenciaExterna)) {
         throw new ErrorDevolucion(409, "CLAVE_EN_CONFLICTO", "La clave ya corresponde a otro reintegro");
       }
       return { ...await resumenReintegro(tx, devolucionId), reiterada: true };
@@ -317,7 +342,8 @@ export async function registrarReintegro(ordenId, devolucionId, entrada, actorUs
     }
     const ahora = await horaBaseDatos(tx);
     await tx.pagoReintegro.create({ data: { devolucionId, importeEfectivo,
-      claveOperacion, actorUsuarioId, fecha: ahora } });
+      claveOperacion, actorUsuarioId, fecha: ahora,
+      ...(ordenPago?.metodoPago === "mercado_pago" ? { referenciaExterna: entrada.referenciaExterna, comprobadoEn: ahora } : {}) } });
     await tx.devolucionCliente.update({ where: { id: devolucionId }, data: {
       estado: centavos(importeEfectivo) === saldo ? "efectivo" : "parcial",
     } });

@@ -102,7 +102,8 @@ test("un subtotal efectivo con centavos se atribuye a dos proveedores sin pérdi
     await e.prisma.orden.update({ where: { id: orden.id },
       data: { subtotal: "500.01", total: "500.01" } });
     assert.equal((await confirmarPagoAdmin(orden.id, e.usuarios[0].id)).status, 200);
-    const filtros = { desde: "2026-10-01", hasta: "2026-10-31",
+    const hasta = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const filtros = { desde: "2026-10-01", hasta,
       productoId: e.producto.id, varianteId: e.variante.id, pagina: 1, limite: 20 };
     const uno = await informeComprasVentas({ ...filtros, proveedorId: primero.id });
     const dos = await informeComprasVentas({ ...filtros, proveedorId: segundo.id });

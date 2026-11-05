@@ -4,6 +4,7 @@ import { esAdmin } from "../middleware/es-admin.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { validateBody } from "../utils/validate.js";
 import { ErrorInventario } from "../services/inventario.js";
+import { cancelarPagoExternoOrden } from "../services/pagos.js";
 import { validarCamposPermitidos } from "../utils/validate-compras.js";
 import { aceptarDevolucionCliente, cerrarSinReintegro, ErrorDevolucion,
   recibirDevolucionCliente, registrarReintegro } from "../services/devoluciones.js";
@@ -86,7 +87,9 @@ router.post("/admin/ordenes/:id/cancelacion", asyncHandler(async (req, res) => {
   if (!id) return res.status(400).json({ message: "ID inválido" });
   const error = validateBody(req.body, { motivo: "string" }, { restituirStock: "boolean" });
   if (error) return res.status(400).json({ message: error });
-  return responder(await cancelarOrdenAdmin(id, req.usuario.id, req.body.motivo, req.body.restituirStock), res);
+  const resultado = await cancelarOrdenAdmin(id, req.usuario.id, req.body.motivo, req.body.restituirStock);
+  if (resultado.status === 200) void cancelarPagoExternoOrden(id).catch(() => {});
+  return responder(resultado, res);
 }));
 
 router.post("/admin/ordenes/:id/devoluciones", asyncHandler(async (req, res) => {
@@ -101,7 +104,7 @@ router.post("/admin/ordenes/:id/devoluciones/:devolucionId/reintegros", asyncHan
   const id = idPositivo(req.params.id);
   const devolucionId = idPositivo(req.params.devolucionId);
   if (!id || !devolucionId) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: "ID inválido" });
-  const error = validarCamposPermitidos(req.body, ["importeEfectivo", "claveOperacion"]);
+  const error = validarCamposPermitidos(req.body, ["importeEfectivo", "claveOperacion", "referenciaExterna", "constanciaExaminada"]);
   if (error) return res.status(400).json({ codigo: "ENTRADA_INVALIDA", message: error });
   res.set("Cache-Control", "no-store").json(await registrarReintegro(id, devolucionId, req.body, req.usuario.id));
 }));
