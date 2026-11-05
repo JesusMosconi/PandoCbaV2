@@ -4,11 +4,15 @@ import prisma from "../../src/db.js";
 
 export function exigirBasePrueba() {
   const url = new URL(process.env.DATABASE_URL ?? "postgresql://invalid/invalid");
-  assert.equal(url.hostname, "ep-floral-dust-acglee71-pooler.sa-east-1.aws.neon.tech");
+  if (process.env.PANDO_TEST_BRANCH_ID === "br-holy-flower-achmzkpy") {
+    assert.ok(["ep-delicate-frost-ac77l56d.sa-east-1.aws.neon.tech", "ep-delicate-frost-ac77l56d-pooler.sa-east-1.aws.neon.tech"].includes(url.hostname));
+  } else {
+    assert.equal(url.hostname, "ep-floral-dust-acglee71-pooler.sa-east-1.aws.neon.tech");
+    assert.equal(process.env.PANDO_TEST_BRANCH_ID, "br-snowy-glitter-acxy36q0");
+  }
   const base = process.env.PANDO_TEST_DATABASE ?? "neondb";
   if (base !== "neondb") assert.match(base, /^codex_003_[a-z0-9_]+$/);
   assert.equal(url.pathname, `/${base}`);
-  assert.equal(process.env.PANDO_TEST_BRANCH_ID, "br-snowy-glitter-acxy36q0");
 }
 
 export async function crearEscenario({ clientes = 1, stock = 4, precio = "120.50" } = {}) {
@@ -49,6 +53,9 @@ export async function crearEscenario({ clientes = 1, stock = 4, precio = "120.50
     const ordenes = await prisma.orden.findMany({ where: { carritoId: { in: ids.carritos } }, select: { id: true } });
     const ordenIds = ordenes.map(({ id }) => id);
     if (ordenIds.length) {
+      await prisma.reintegroPago.deleteMany({ where: { ordenId: { in: ordenIds } } });
+      await prisma.incidenciaPago.deleteMany({ where: { ordenId: { in: ordenIds } } });
+      await prisma.intentoPago.deleteMany({ where: { ordenId: { in: ordenIds } } });
       await prisma.eventoOrden.deleteMany({ where: { ordenId: { in: ordenIds } } });
       await prisma.reservaStock.deleteMany({ where: { ordenId: { in: ordenIds } } });
       await prisma.detalleOrden.deleteMany({ where: { ordenId: { in: ordenIds } } });

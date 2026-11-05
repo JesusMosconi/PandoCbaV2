@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { ErrorDatosCheckout, normalizarEntrega, resumenCheckout } from "../src/services/checkout.js";
 import { confirmarCheckout, ErrorConfirmacionCheckout } from "../src/services/checkout.js";
@@ -201,4 +202,51 @@ test("envío conserva detalle, cinco datos normalizados y total final sin cotiza
     assert.equal(persistida.reservas[0].cantidad, 2);
     assert.equal(persistida.eventos.length, 1);
   } finally { await escenario.limpiar(); }
+});
+
+test("checkout de tesis rechaza domicilio o cotización cambiados y confirma una sola vez", async () => {
+  const claves = ["PAGOS_ONLINE_HABILITADOS", "PAGOS_ENTORNO", "PANDO_TEST_BRANCH_ID", "DATABASE_URL"];
+  const anteriores = Object.fromEntries(claves.map((clave) => [clave, process.env[clave]]));
+  const escenario = await crearEscenario({ precio: "20000.01" });
+  try {
+    Object.assign(process.env, { PAGOS_ONLINE_HABILITADOS: "true", PAGOS_ENTORNO: "prueba",
+      PANDO_TEST_BRANCH_ID: "br-holy-flower-achmzkpy" });
+    const usuario = escenario.usuarios[0];
+    await escenario.carrito(usuario, [2]);
+    const entrega = { tipoEntrega: "envio", datosEnvio: { direccion: "Calle ficticia 123",
+      ciudad: "Córdoba Capital", codPostal: "X5000ABC", telefono: "3511234567",
+      email: "tesis@example.invalid" } };
+    const resumen = await resumenCheckout(usuario.id, entrega);
+    assert.equal(resumen.subtotalProductos, "40000.02");
+    assert.equal(resumen.costoEnvio, "15000.00");
+    assert.equal(resumen.totalFinal, "55000.02");
+    await assert.rejects(confirmarCheckout(usuario.id, { ...entrega,
+      datosEnvio: { ...entrega.datosEnvio, direccion: "Otra calle ficticia 456" },
+      huellaResumen: resumen.huellaResumen, claveConfirmacion: randomUUID(), aceptaPrecioVigente: true,
+    }), (error) => error.codigo === "RESUMEN_CAMBIO");
+    await assert.rejects(confirmarCheckout(usuario.id, { tipoEntrega: "retiro",
+      huellaResumen: resumen.huellaResumen, claveConfirmacion: randomUUID(), aceptaPrecioVigente: true,
+    }), (error) => error.codigo === "RESUMEN_CAMBIO");
+    process.env.PAGOS_ONLINE_HABILITADOS = "false";
+    await assert.rejects(confirmarCheckout(usuario.id, { ...entrega,
+      huellaResumen: resumen.huellaResumen, claveConfirmacion: randomUUID(), aceptaPrecioVigente: true,
+    }), (error) => error.codigo === "RESUMEN_CAMBIO");
+    assert.equal(await escenario.prisma.orden.count({ where: { usuarioId: usuario.id } }), 0);
+    process.env.PAGOS_ONLINE_HABILITADOS = "true";
+    const entrada = { ...entrega, huellaResumen: resumen.huellaResumen,
+      claveConfirmacion: randomUUID(), aceptaPrecioVigente: true };
+    const primera = await confirmarCheckout(usuario.id, entrada);
+    const segunda = await confirmarCheckout(usuario.id, entrada);
+    assert.equal(primera.orden.id, segunda.orden.id);
+    assert.equal(primera.orden.total.toFixed(2), "55000.02");
+    assert.equal(primera.orden.esDemostracion, true);
+    assert.equal(await escenario.prisma.orden.count({ where: { usuarioId: usuario.id } }), 1);
+    assert.equal(await escenario.prisma.reservaStock.count({ where: { ordenId: primera.orden.id } }), 1);
+  } finally {
+    for (const clave of claves) {
+      if (anteriores[clave] === undefined) delete process.env[clave];
+      else process.env[clave] = anteriores[clave];
+    }
+    await escenario.limpiar();
+  }
 });

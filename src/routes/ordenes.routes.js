@@ -4,6 +4,7 @@ import { esCliente } from "../middleware/es-cliente.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { cancelarOrdenCliente, listarOrdenesCliente, obtenerOrdenCliente } from "../services/ordenes.js";
 import { ErrorInventario } from "../services/inventario.js";
+import { cancelarPagoExternoOrden } from "../services/pagos.js";
 
 const router = Router();
 router.use("/ordenes", verificarToken, esCliente);
@@ -29,6 +30,7 @@ router.post("/ordenes/:id/cancelacion", asyncHandler(async (req, res) => {
   const id = idOrden(req.params.id);
   if (!id) return res.status(400).json({ message: "ID de orden inválido", codigo: "ID_INVALIDO" });
   const resultado = await cancelarOrdenCliente(req.usuario.id, id);
+  if (resultado.status === 200) void cancelarPagoExternoOrden(id).catch(() => {});
   res.status(resultado.status).set("Cache-Control", "no-store").json(
     resultado.status === 200 ? resultado.orden : {
       message: resultado.message,

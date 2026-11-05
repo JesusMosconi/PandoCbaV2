@@ -4,6 +4,8 @@ import prisma from "../db.js";
 import { bloquearVariantes, disponibilidadVariantes, horaBaseDatos } from "./inventario.js";
 import { ErrorPartidas, seleccionarPartidasFIFO } from "./partidas.js";
 import { esProductoPublicado } from "../utils/visibilidad-producto.js";
+import { cotizarEntrega } from "./cobertura-envio.js";
+import { pagosOnlineDisponibles } from "./configuracion-pagos.js";
 
 const incluirCarrito = {
   items: {
@@ -126,6 +128,10 @@ export async function confirmarCheckout(usuarioId, entrada) {
             "El carrito cambió durante la confirmación");
         }
         const resumen = await resumenCheckout(usuarioId, entrada, tx, carritoActual);
+        if (resumen.cobertura === "fuera_de_cobertura") {
+          throw new ErrorConfirmacionCheckout(409, "ENVIO_FUERA_COBERTURA",
+            "El envío está disponible solo para Córdoba Capital", { camposInvalidos: resumen.camposInvalidos, resumen });
+        }
         const afectados = resumen.lineas.flatMap((linea) => linea.motivosBloqueo
           .map((motivo) => ({ itemCarritoId: linea.itemCarritoId, motivo })));
         if (afectados.length) {
@@ -185,9 +191,11 @@ export async function confirmarCheckout(usuarioId, entrada) {
             estado: "pendiente_pago",
             tipoEntrega: entrega.tipoEntrega,
             subtotal,
-            costoEnvio: null,
-            total: entrega.tipoEntrega === "retiro" ? subtotal : null,
-            metodoPago: "manual",
+            costoEnvio: resumen.pagosOnlineDisponibles ? decimal(resumen.costoEnvio) : null,
+            total: resumen.pagosOnlineDisponibles ? decimal(resumen.totalFinal)
+              : entrega.tipoEntrega === "retiro" ? subtotal : null,
+            metodoPago: resumen.pagosOnlineDisponibles ? "mercado_pago" : "manual",
+            ...(resumen.pagosOnlineDisponibles ? { esDemostracion: true } : {}),
             creadaEn,
             venceEn,
             claveConfirmacion: clave,
@@ -324,10 +332,16 @@ export async function resumenCheckout(usuarioId, entrada, tx = prisma, carritoDa
     };
   });
 
+  const online = pagosOnlineDisponibles();
+  const cotizacion = online ? cotizarEntrega(entrega) : null;
+  const costoEnvio = cotizacion?.costoEnvio ?? null;
+  const totalFinal = online ? cotizacion.cubierta ? subtotalProductos.add(decimal(costoEnvio)).toFixed(2) : null
+    : entrega.tipoEntrega === "retiro" ? dinero(subtotalProductos) : null;
   const huellaResumen = createHash("sha256").update(JSON.stringify({
     usuarioId,
     carritoId: carrito?.id ?? null,
     entrega,
+    ...(online ? { costoEnvio, totalFinal, cobertura: cotizacion.cobertura, esDemostracion: true } : {}),
     lineas: lineas.map((linea) => ({
       id: linea.itemCarritoId,
       cantidad: linea.cantidad,
@@ -342,11 +356,16 @@ export async function resumenCheckout(usuarioId, entrada, tx = prisma, carritoDa
     lineas,
     subtotalCarrito: dinero(subtotalCarrito),
     subtotalProductos: dinero(subtotalProductos),
-    estadoCostoEnvio: entrega.tipoEntrega === "retiro" ? "no_aplica" : "sin_cotizar",
-    costoEnvio: null,
-    totalFinal: entrega.tipoEntrega === "retiro" ? dinero(subtotalProductos) : null,
+    estadoCostoEnvio: entrega.tipoEntrega === "retiro" ? "no_aplica" : online && cotizacion.cubierta ? "cotizado" : "sin_cotizar",
+    costoEnvio,
+    totalFinal,
+    pagosOnlineDisponibles: online,
+    esDemostracion: online,
+    cobertura: cotizacion?.cobertura ?? null,
+    camposInvalidos: cotizacion && !cotizacion.cubierta ? [{ campo: cotizacion.campo,
+      codigo: cotizacion.codigo, mensaje: cotizacion.mensaje }] : [],
     huellaResumen,
-    puedeConfirmar: lineas.length > 0 && lineas.every((linea) => linea.disponible),
+    puedeConfirmar: lineas.length > 0 && lineas.every((linea) => linea.disponible) && (!online || cotizacion.cubierta),
     entrega,
   };
 }
@@ -430,5 +449,7 @@ export function normalizarEntrega(entrada) {
   }
 
   if (errores.length) throw new ErrorDatosCheckout(errores);
-  return { tipoEntrega: "envio", datosEnvio: { direccion, ciudad, codPostal, telefono, email } };
+  const entrega = { tipoEntrega: "envio", datosEnvio: { direccion, ciudad, codPostal, telefono, email } };
+  if (pagosOnlineDisponibles() && cotizarEntrega(entrega).cubierta) entrega.datosEnvio.ciudad = "Córdoba Capital";
+  return entrega;
 }
