@@ -79,6 +79,7 @@ model Producto {
   CreatedAt    DateTime       @default(now())
   UpdatedAt    DateTime       @updatedAt
   web          Boolean        @default(true)
+  local        Boolean        @default(true)
   creadoDesdeCompras Boolean  @default(false)
   categoria    Categoria      @relation(fields: [categoriaId], references: [id])
   categoriaId  Int
@@ -492,6 +493,7 @@ model ItemCarrito {
   carritoId        Int
   productoImprovisado ProductoImprovisado? @relation(fields: [productoImprovisadoId], references: [id])
   productoImprovisadoId Int?
+  concepto         String?
 }
 
 model ProductoImprovisado {
@@ -527,6 +529,12 @@ model Orden {
   canceladaEn DateTime? @db.Timestamptz(3)
   motivoCancelacion String?
   restituirStock Boolean?
+  canal        String         @default("web")
+  nombreCliente   String?
+  telefonoCliente String?
+  caja         Caja?          @relation(fields: [cajaId], references: [id], onDelete: Restrict)
+  cajaId       Int?
+  numeroComprobante Int?      @unique
   usuario      Usuario        @relation(fields: [usuarioId], references: [id])
   usuarioId    Int
   carrito      Carrito        @relation(fields: [carritoId], references: [id])
@@ -544,6 +552,31 @@ model Orden {
   @@unique([usuarioId, claveConfirmacion])
   @@index([usuarioId, creadaEn])
   @@index([estado, venceEn])
+  @@index([canal, pagoConfirmadoEn])
+  @@index([cajaId])
+}
+
+// Caja única del local. El índice parcial "Caja_una_abierta" (solo en la
+// migración SQL) impide que haya dos cajas abiertas al mismo tiempo.
+model Caja {
+  id                Int       @id @default(autoincrement())
+  estado            String    @default("abierta")
+  efectivoInicial   Decimal   @db.Decimal(14, 2)
+  abiertaEn         DateTime  @db.Timestamptz(3)
+  abiertaPorId      Int
+  claveApertura     String?   @unique
+  cerradaEn         DateTime? @db.Timestamptz(3)
+  cerradaPorId      Int?
+  cantidadVentas    Int?
+  totalesPorMedio   Json?
+  totalVentas       Decimal?  @db.Decimal(14, 2)
+  efectivoEsperado  Decimal?  @db.Decimal(14, 2)
+  efectivoDeclarado Decimal?  @db.Decimal(14, 2)
+  diferencia        Decimal?  @db.Decimal(14, 2)
+  observacion       String?
+  ordenes           Orden[]
+
+  @@index([estado, abiertaEn])
 }
 
 model IntentoPago {

@@ -11,13 +11,13 @@ import { actualizarVigenciaPrecio, registrarPrecioInicial } from "../services/pr
 const router = Router();
 const requerirAdmin = [verificarToken, esAdmin];
 const requiredFields = { nombre: "string", precio: "number", categoriaId: "number" };
-const optionalFields = { descripcion: "string", activo: "boolean", web: "boolean", coleccionId: "number" };
+const optionalFields = { descripcion: "string", activo: "boolean", web: "boolean", local: "boolean", coleccionId: "number" };
 
 router.get("/productos", (req, res, next) => {
   if (req.query.admin !== "true") return next();
   return verificarToken(req, res, () => esAdmin(req, res, next));
 }, asyncHandler(async (req, res) => {
-  const { categoriaId, web, talle, orden, coleccionId, admin } = req.query;
+  const { categoriaId, web, local, talle, orden, coleccionId, admin } = req.query;
   const esAdmin = admin === "true";
   const productos = await prisma.producto.findMany({
     where: {
@@ -25,6 +25,7 @@ router.get("/productos", (req, res, next) => {
       categoriaId: categoriaId ? Number(categoriaId) : undefined,
       coleccionId: coleccionId ? Number(coleccionId) : undefined,
       ...(esAdmin && web === "true" ? { web: true } : {}),
+      ...(esAdmin && (local === "true" || local === "false") ? { local: local === "true" } : {}),
       talles: talle ? { some: { talle: { valor: talle } } } : undefined,
     },
     orderBy: orden === "asc" || orden === "desc" ? { precio: orden } : undefined,
@@ -67,10 +68,10 @@ router.get("/productos/:id", asyncHandler(async (req, res) => {
 router.post("/productos", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
-  const { nombre, precio, categoriaId, descripcion, activo, web, coleccionId } = req.body;
+  const { nombre, precio, categoriaId, descripcion, activo, web, local, coleccionId } = req.body;
   const producto = await prisma.$transaction(async (tx) => {
     const creado = await tx.producto.create({ data: {
-      nombre, precio, categoriaId, descripcion, activo, web, coleccionId,
+      nombre, precio, categoriaId, descripcion, activo, web, local, coleccionId,
     } });
     await registrarPrecioInicial(tx, creado);
     return creado;
@@ -81,7 +82,7 @@ router.post("/productos", ...requerirAdmin, asyncHandler(async (req, res) => {
 router.put("/productos/:id", ...requerirAdmin, asyncHandler(async (req, res) => {
   const error = validateBody(req.body, requiredFields, optionalFields);
   if (error) return res.status(400).json({ message: error });
-  const { nombre, precio, categoriaId, descripcion, activo, web, coleccionId } = req.body;
+  const { nombre, precio, categoriaId, descripcion, activo, web, local, coleccionId } = req.body;
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: "Identificador inválido" });
   const resultado = await prisma.$transaction(async (tx) => {
@@ -98,7 +99,7 @@ router.put("/productos/:id", ...requerirAdmin, asyncHandler(async (req, res) => 
     }
     const nuevo = await tx.producto.update({
       where: { id },
-      data: { nombre, precio, categoriaId, descripcion, activo, web, coleccionId },
+      data: { nombre, precio, categoriaId, descripcion, activo, web, local, coleccionId },
     });
     await actualizarVigenciaPrecio(tx, actual, nuevo);
     return { valor: nuevo };

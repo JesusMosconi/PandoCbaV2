@@ -15,6 +15,7 @@ import {
   listarOrdenesAdmin,
   obtenerOrdenAdmin,
 } from "../services/ordenes.js";
+import { CANALES, METODOS_PAGO } from "../services/ventas-canal.js";
 
 const router = Router();
 router.use("/admin/ordenes", verificarToken, esAdmin);
@@ -42,19 +43,27 @@ function responder(resultado, res) {
 }
 
 router.get("/admin/ordenes", asyncHandler(async (req, res) => {
-  const { estado, tipoEntrega } = req.query;
+  const { estado, tipoEntrega, canal, metodoPago } = req.query;
   if (estado && (typeof estado !== "string" || !estados.has(estado))) {
     return res.status(400).json({ message: "Filtro de estado inválido" });
   }
-  if (tipoEntrega && !["retiro", "envio"].includes(tipoEntrega)) {
+  if (tipoEntrega && !["retiro", "envio", "local"].includes(tipoEntrega)) {
     return res.status(400).json({ message: "Filtro de entrega inválido" });
+  }
+  if (canal && !CANALES.includes(canal)) {
+    return res.status(400).json({ message: "Filtro de canal inválido" });
+  }
+  if (metodoPago && !METODOS_PAGO.includes(metodoPago)) {
+    return res.status(400).json({ message: "Filtro de medio de pago inválido" });
   }
   const pagina = req.query.pagina === undefined ? 1 : idPositivo(req.query.pagina);
   const limite = req.query.limite === undefined ? 20 : idPositivo(req.query.limite);
   if (!pagina || !limite || limite > 100) {
     return res.status(400).json({ message: "Paginación inválida" });
   }
-  res.set("Cache-Control", "no-store").json(await listarOrdenesAdmin({ estado, tipoEntrega, pagina, limite }));
+  res.set("Cache-Control", "no-store").json(await listarOrdenesAdmin({
+    estado, tipoEntrega, canal: canal || undefined, metodoPago: metodoPago || undefined, pagina, limite,
+  }));
 }));
 
 router.get("/admin/ordenes/:id", asyncHandler(async (req, res) => {

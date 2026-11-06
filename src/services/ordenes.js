@@ -207,28 +207,42 @@ const incluirOrdenAdmin = {
 };
 
 function presentarOrdenAdmin(orden, ahora) {
+  const presentada = presentarOrden(orden, ahora, { incluirEventos: true });
+  // Las ventas del local no se atribuyen a una persona: se ocultan el operador y los actores.
+  const local = orden.canal === "local";
   return {
-    ...presentarOrden(orden, ahora, { incluirEventos: true }),
-    cliente: orden.usuario,
+    ...presentada,
+    ...(local ? {
+      usuarioId: null,
+      eventos: presentada.eventos.map((evento) => ({ ...evento, actorUsuarioId: null })),
+    } : {}),
+    canal: orden.canal,
+    metodoPago: orden.metodoPago,
+    numeroComprobante: orden.numeroComprobante,
+    nombreCliente: orden.nombreCliente,
+    telefonoCliente: orden.telefonoCliente,
+    cliente: local ? null : orden.usuario,
+    
     intentosPago: (orden.intentosPago ?? []).map((i) => ({ id: i.id, estado: i.estado,
-      referenciaExterna: i.referenciaExterna, importe: i.importe.toFixed(2), creadoEn: i.creadoEn.toISOString(),
-      ultimoChequeoEn: i.ultimoChequeoEn?.toISOString() ?? null })),
-    incidenciasPago: (orden.incidenciasPago ?? []).map((i) => ({ id: i.id, tipo: i.tipo, estado: i.estado,
-      referenciaExterna: i.referenciaExterna, importe: i.importe?.toFixed(2) ?? null,
-      detectadaEn: i.detectadaEn.toISOString(), resueltaEn: i.resueltaEn?.toISOString() ?? null,
-      actorUsuarioId: i.actorUsuarioId, resolucion: i.resolucion })),
-    reintegrosPago: (orden.reintegrosPago ?? []).map((r) => ({ id: r.id, concepto: r.concepto,
-      importeDebido: r.importeDebido.toFixed(2), importeReintegrado: r.importeReintegrado.toFixed(2), estado: r.estado,
-      referenciaExterna: r.referenciaExterna, comprobadoEn: r.comprobadoEn?.toISOString() ?? null,
-      creadoEn: r.creadoEn.toISOString(), actorUsuarioId: r.actorUsuarioId, motivo: r.motivo,
-      metodo: r.metodo })),
-    saldoMonetarioPendiente: importeDecimal(
-      (orden.reintegrosPago ?? []).reduce((s, r) => s + centavos(r.importeDebido.toFixed(2)) - centavos(r.importeReintegrado.toFixed(2)), 0n)
-      + (orden.devolucionesCliente ?? []).filter((d) => d.estado !== "sin_reintegro").reduce((s, d) => s
-        + centavos(d.importeDebido.toFixed(2)) - d.pagos.reduce((p, r) => p + centavos(r.importeEfectivo.toFixed(2)), 0n), 0n)),
+  referenciaExterna: i.referenciaExterna, importe: i.importe.toFixed(2), creadoEn: i.creadoEn.toISOString(),
+  ultimoChequeoEn: i.ultimoChequeoEn?.toISOString() ?? null })),
+incidenciasPago: (orden.incidenciasPago ?? []).map((i) => ({ id: i.id, tipo: i.tipo, estado: i.estado,
+  referenciaExterna: i.referenciaExterna, importe: i.importe?.toFixed(2) ?? null,
+  detectadaEn: i.detectadaEn.toISOString(), resueltaEn: i.resueltaEn?.toISOString() ?? null,
+  actorUsuarioId: i.actorUsuarioId, resolucion: i.resolucion })),
+reintegrosPago: (orden.reintegrosPago ?? []).map((r) => ({ id: r.id, concepto: r.concepto,
+  importeDebido: r.importeDebido.toFixed(2), importeReintegrado: r.importeReintegrado.toFixed(2), estado: r.estado,
+  referenciaExterna: r.referenciaExterna, comprobadoEn: r.comprobadoEn?.toISOString() ?? null,
+  creadoEn: r.creadoEn.toISOString(), actorUsuarioId: r.actorUsuarioId, motivo: r.motivo,
+  metodo: r.metodo })),
+saldoMonetarioPendiente: importeDecimal(
+  (orden.reintegrosPago ?? []).reduce((s, r) => s + centavos(r.importeDebido.toFixed(2)) - centavos(r.importeReintegrado.toFixed(2)), 0n)
+  + (orden.devolucionesCliente ?? []).filter((d) => d.estado !== "sin_reintegro").reduce((s, d) => s
+    + centavos(d.importeDebido.toFixed(2)) - d.pagos.reduce((p, r) => p + centavos(r.importeEfectivo.toFixed(2)), 0n), 0n)),
+    
     motivoCancelacion: orden.motivoCancelacion,
     restituirStock: orden.restituirStock,
-    pagoConfirmadoPorId: orden.pagoConfirmadoPorId,
+    pagoConfirmadoPorId: local ? null : orden.pagoConfirmadoPorId,
     envioCoordinadoPorId: orden.envioCoordinadoPorId,
     devolucionesCliente: (orden.devolucionesCliente ?? []).map((devolucion) => {
       const importeReintegradoAcumulado = devolucion.pagos.reduce((total, pago) =>
@@ -261,10 +275,12 @@ function presentarOrdenAdmin(orden, ahora) {
   };
 }
 
-export async function listarOrdenesAdmin({ estado, tipoEntrega, pagina = 1, limite = 20 } = {}) {
+export async function listarOrdenesAdmin({ estado, tipoEntrega, canal, metodoPago, pagina = 1, limite = 20 } = {}) {
   const where = {
     ...(estado ? { estado } : {}),
     ...(tipoEntrega ? { tipoEntrega } : {}),
+    ...(canal ? { canal } : {}),
+    ...(metodoPago ? { metodoPago } : {}),
   };
   const [ahora, total, ordenes] = await Promise.all([
     horaBaseDatos(prisma),
