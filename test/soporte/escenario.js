@@ -8,6 +8,7 @@ import prisma from "../../src/db.js";
 const BASES_PRUEBA = {
   "ep-floral-dust-acglee71": "br-snowy-glitter-acxy36q0",
   "ep-fancy-queen-acudbg1e": "ep-fancy-queen-acudbg1e",
+  "ep-delicate-frost-ac77l56d": "br-holy-flower-achmzkpy",
 };
 
 export function exigirBasePrueba() {
@@ -60,6 +61,9 @@ export async function crearEscenario({ clientes = 1, stock = 4, precio = "120.50
     const ordenes = await prisma.orden.findMany({ where: { carritoId: { in: ids.carritos } }, select: { id: true } });
     const ordenIds = ordenes.map(({ id }) => id);
     if (ordenIds.length) {
+      await prisma.reintegroPago.deleteMany({ where: { ordenId: { in: ordenIds } } });
+      await prisma.incidenciaPago.deleteMany({ where: { ordenId: { in: ordenIds } } });
+      await prisma.intentoPago.deleteMany({ where: { ordenId: { in: ordenIds } } });
       await prisma.eventoOrden.deleteMany({ where: { ordenId: { in: ordenIds } } });
       await prisma.reservaStock.deleteMany({ where: { ordenId: { in: ordenIds } } });
       await prisma.detalleOrden.deleteMany({ where: { ordenId: { in: ordenIds } } });

@@ -36,6 +36,17 @@ export async function vencerOrdenBloqueada(tx, orden, ahora = null) {
   if (cambio.count !== 1) {
     throw new Error("La orden cambió durante el vencimiento");
   }
+  if (orden.esDemostracion && orden.metodoPago === "mercado_pago") {
+    const intentos = await tx.intentoPago.findMany({ where: { ordenId: orden.id,
+      estado: { in: ["preparado", "creacion_incierta", "abierto"] } } });
+    for (const intento of intentos) {
+      const claveHallazgo = `${intento.id}:${intento.referenciaExterna ?? "sin-referencia"}:resultado_incierto`;
+      await tx.incidenciaPago.upsert({ where: { claveHallazgo }, update: {}, create: {
+        claveHallazgo, ordenId: orden.id, intentoId: intento.id, referenciaExterna: intento.referenciaExterna,
+        tipo: "resultado_incierto", moneda: "ARS",
+      } });
+    }
+  }
   await tx.eventoOrden.create({
     data: {
       ordenId: orden.id,
@@ -62,6 +73,9 @@ export async function vencerOrden(ordenId) {
 const incluirOrdenCliente = {
   detalles: { orderBy: { posicion: "asc" } },
   datosEnvio: true,
+  intentosPago: { orderBy: { id: "desc" } },
+  incidenciasPago: { where: { estado: "abierta" } },
+  reintegrosPago: true,
 };
 
 export function presentarOrden(orden, ahora, { incluirEventos = false } = {}) {
@@ -74,11 +88,19 @@ export function presentarOrden(orden, ahora, { incluirEventos = false } = {}) {
     estadoVisible: nueva ? estadoVisible(orden, ahora) : orden.estado,
     puedeCancelar: nueva && puedeCancelarCliente(orden, ahora),
     esHeredada: !nueva,
+    esDemostracion: Boolean(orden.esDemostracion),
+    metodoPago: orden.metodoPago,
+    domicilioRevisado: Boolean(orden.domicilioRevisadoEn),
+    domicilioRevisadoEn: orden.domicilioRevisadoEn?.toISOString() ?? null,
+    estadoPago: orden.incidenciasPago?.length ? "incidencia" : orden.pagoConfirmadoEn ? "aprobado"
+      : orden.intentosPago?.[0]?.estado === "rechazado" ? "rechazado"
+        : orden.intentosPago?.length ? "pendiente" : "sin_iniciar",
     creadaEn: orden.creadaEn?.toISOString() ?? null,
     venceEn: orden.venceEn?.toISOString() ?? null,
     canceladaEn: orden.canceladaEn?.toISOString() ?? null,
     subtotalProductos: orden.subtotal.toString(),
-    estadoCostoEnvio: nueva ? (orden.tipoEntrega === "envio" ? "sin_cotizar" : "no_aplica") : null,
+    estadoCostoEnvio: nueva ? (orden.tipoEntrega === "envio" ? orden.esDemostracion && orden.costoEnvio !== null
+      ? "cotizado" : "sin_cotizar" : "no_aplica") : null,
     costoEnvio: orden.costoEnvio?.toString() ?? null,
     totalFinal: orden.total?.toString() ?? null,
     pagoConfirmadoEn: orden.pagoConfirmadoEn?.toISOString() ?? null,
@@ -174,6 +196,7 @@ export async function cancelarOrdenCliente(usuarioId, ordenId) {
 
 const incluirOrdenAdmin = {
   ...incluirOrdenCliente,
+  incidenciasPago: { orderBy: { id: "desc" } },
   usuario: { select: { id: true, nombre: true, apellido: true, email: true } },
   eventos: { orderBy: [{ fecha: "asc" }, { id: "asc" }] },
   devolucionesCliente: {
@@ -199,6 +222,24 @@ function presentarOrdenAdmin(orden, ahora) {
     nombreCliente: orden.nombreCliente,
     telefonoCliente: orden.telefonoCliente,
     cliente: local ? null : orden.usuario,
+    
+    intentosPago: (orden.intentosPago ?? []).map((i) => ({ id: i.id, estado: i.estado,
+  referenciaExterna: i.referenciaExterna, importe: i.importe.toFixed(2), creadoEn: i.creadoEn.toISOString(),
+  ultimoChequeoEn: i.ultimoChequeoEn?.toISOString() ?? null })),
+incidenciasPago: (orden.incidenciasPago ?? []).map((i) => ({ id: i.id, tipo: i.tipo, estado: i.estado,
+  referenciaExterna: i.referenciaExterna, importe: i.importe?.toFixed(2) ?? null,
+  detectadaEn: i.detectadaEn.toISOString(), resueltaEn: i.resueltaEn?.toISOString() ?? null,
+  actorUsuarioId: i.actorUsuarioId, resolucion: i.resolucion })),
+reintegrosPago: (orden.reintegrosPago ?? []).map((r) => ({ id: r.id, concepto: r.concepto,
+  importeDebido: r.importeDebido.toFixed(2), importeReintegrado: r.importeReintegrado.toFixed(2), estado: r.estado,
+  referenciaExterna: r.referenciaExterna, comprobadoEn: r.comprobadoEn?.toISOString() ?? null,
+  creadoEn: r.creadoEn.toISOString(), actorUsuarioId: r.actorUsuarioId, motivo: r.motivo,
+  metodo: r.metodo })),
+saldoMonetarioPendiente: importeDecimal(
+  (orden.reintegrosPago ?? []).reduce((s, r) => s + centavos(r.importeDebido.toFixed(2)) - centavos(r.importeReintegrado.toFixed(2)), 0n)
+  + (orden.devolucionesCliente ?? []).filter((d) => d.estado !== "sin_reintegro").reduce((s, d) => s
+    + centavos(d.importeDebido.toFixed(2)) - d.pagos.reduce((p, r) => p + centavos(r.importeEfectivo.toFixed(2)), 0n), 0n)),
+    
     motivoCancelacion: orden.motivoCancelacion,
     restituirStock: orden.restituirStock,
     pagoConfirmadoPorId: local ? null : orden.pagoConfirmadoPorId,
@@ -222,7 +263,8 @@ function presentarOrdenAdmin(orden, ahora) {
         unidadesCostoDesconocido: devolucion.unidadesCostoDesconocido,
         pagos: devolucion.pagos.map((pago) => ({ id: pago.id, devolucionId: pago.devolucionId,
           importeEfectivo: pago.importeEfectivo.toFixed(2), claveOperacion: pago.claveOperacion,
-          actorUsuarioId: pago.actorUsuarioId, fecha: pago.fecha.toISOString() })),
+          actorUsuarioId: pago.actorUsuarioId, fecha: pago.fecha.toISOString(),
+          referenciaExterna: pago.referenciaExterna, comprobadoEn: pago.comprobadoEn?.toISOString() ?? null })),
         recepciones: devolucion.recepciones.map((recepcion) => ({ id: recepcion.id,
           devolucionId: recepcion.devolucionId, claveOperacion: recepcion.claveOperacion,
           actorUsuarioId: recepcion.actorUsuarioId, motivo: recepcion.motivo,
@@ -287,6 +329,7 @@ export async function confirmarPagoAdmin(ordenId, actorUsuarioId) {
     return await prisma.$transaction(async (tx) => {
     const orden = await bloquearOrden(tx, ordenId);
     if (!orden) return { status: 404, message: "Orden no encontrada" };
+    if (orden.metodoPago === "mercado_pago") return { status: 409, message: "El pago online solo se confirma mediante el proveedor" };
     await estadoInventarioParaEscritura(tx);
     const reservas = await tx.reservaStock.findMany({
       where: { ordenId, estado: "activa" }, select: { talleProductoId: true },
@@ -359,7 +402,10 @@ export async function cambiarEstadoAdmin(ordenId, actorUsuarioId, destino, envio
       return { status: 409, message: "La transición no corresponde al estado o la entrega de esta orden",
         orden: presentarOrdenAdmin(actual, ahora) };
     }
-    if (destino === "enviada" && envioCoordinado !== true) {
+    if (destino === "enviada" && orden.metodoPago === "mercado_pago" && !orden.domicilioRevisadoEn) {
+      return { status: 409, message: "Registrá la revisión de calle y altura antes del envío simulado" };
+    }
+    if (destino === "enviada" && orden.metodoPago !== "mercado_pago" && envioCoordinado !== true) {
       const actual = await tx.orden.findUnique({ where: { id: ordenId }, include: incluirOrdenAdmin });
       return { status: 409, message: "Confirmá la coordinación externa del envío antes de marcarla enviada",
         orden: presentarOrdenAdmin(actual, ahora) };
@@ -371,7 +417,8 @@ export async function cambiarEstadoAdmin(ordenId, actorUsuarioId, destino, envio
       where: { id: ordenId, estado: orden.estado },
       data: {
         estado: destino,
-        ...(destino === "enviada" ? { envioCoordinadoEn: ahora, envioCoordinadoPorId: actorUsuarioId } : {}),
+        ...(destino === "enviada" && orden.metodoPago !== "mercado_pago"
+          ? { envioCoordinadoEn: ahora, envioCoordinadoPorId: actorUsuarioId } : {}),
       },
     });
     if (cambio.count !== 1) throw new Error("La orden cambió durante la transición");
@@ -471,6 +518,19 @@ export async function cancelarOrdenAdmin(ordenId, actorUsuarioId, motivo, restit
       }
     }
 
+    if (pagada && orden.esDemostracion) {
+      const detalles = await tx.detalleOrden.findMany({ where: { ordenId } });
+      for (const detalle of detalles) {
+        const claveOperacion = `cancelacion_pagada:${ordenId}`;
+        await tx.devolucionCliente.upsert({ where: { claveOperacion_detalleOrdenId: { claveOperacion, detalleOrdenId: detalle.id } },
+          update: {}, create: { ordenId, detalleOrdenId: detalle.id, cantidad: detalle.cantidad,
+            importeDebido: detalle.importeLinea, costoRevertido: null, unidadesCostoDesconocido: detalle.cantidad,
+            motivo: motivoLimpio, claveOperacion, huellaSolicitud: `cancelacion-tesis-${ordenId}`, actorUsuarioId } });
+      }
+      if (orden.costoEnvio?.gt(0)) await tx.reintegroPago.upsert({ where: { claveOperacion: `envio-${ordenId}` },
+        update: {}, create: { ordenId, concepto: "envio", importeDebido: orden.costoEnvio,
+          claveOperacion: `envio-${ordenId}`, motivo: motivoLimpio, actorUsuarioId } });
+    }
     const cambio = await tx.orden.updateMany({
       where: { id: ordenId, estado: orden.estado },
       data: {

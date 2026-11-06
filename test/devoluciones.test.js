@@ -6,6 +6,8 @@ import { crearProveedor } from "../src/services/proveedores.js";
 import { anularIngreso, confirmarIngreso, corregirIngreso, crearBorradorIngreso } from "../src/services/compras.js";
 import { confirmarCheckout, resumenCheckout } from "../src/services/checkout.js";
 import { cambiarEstadoAdmin, confirmarPagoAdmin, obtenerOrdenAdmin } from "../src/services/ordenes.js";
+import { iniciarPago, conciliarIntento } from "../src/services/pagos.js";
+import { revisarDomicilio, decidirReintegroEnvio, iniciarReintegroSimulado, completarReintegroSimulado } from "../src/services/administracion-pagos.js";
 import {
   aceptarDevolucionCliente, devolverAProveedor, recibirDevolucionCliente, registrarReintegro,
 } from "../src/services/devoluciones.js";
@@ -149,6 +151,113 @@ test("recepciones parciales aptas y dañadas no duplican stock ni exceden la dev
     { importeEfectivo: "0.01", claveOperacion: randomUUID() }, actor),
   (error) => error.codigo === "REINTEGRO_EXCEDIDO");
   assert.equal(await db.recepcionDevolucion.count({ where: { devolucionId } }), 2);
+});
+
+test("orden online simulada: devolución parcial tras salida y envío se reintegran una vez", {
+  skip: process.env.PANDO_TEST_SPECIAL !== "1",
+}, async () => {
+  const e = await crearEscenario({ stock: 0, precio: "20000.01" });
+  const db = e.prisma;
+  const actor = e.usuarios[0].id;
+  const entorno = { ...process.env };
+  const transporte = globalThis.fetch;
+  try {
+    await db.talleProducto.update({ where: { id: e.variante.id }, data: { inicioInventarioCero: true } });
+    await db.estadoCorteVariante.create({ data: {
+      varianteId: e.variante.id, corteId: 1, estado: "conciliado", origen: "nueva",
+      saldoCapturado: 0, comprometido: 0, diferencia: 0,
+      conciliadoEn: new Date(), conciliadoPorId: actor,
+    } });
+    const proveedor = await crearProveedor({ nombre: `Proveedor ${randomUUID()}` }, actor);
+    const ingreso = await crearBorradorIngreso({ proveedorId: proveedor.id,
+      fechaCompra: "2026-10-18", fechaRecepcion: "2026-10-19",
+      lineas: [{ varianteId: e.variante.id, cantidad: 2, costoUnitario: "5000.00" }] });
+    await confirmarIngreso(ingreso.id, { claveOperacion: randomUUID(),
+      resumenAceptado: ingreso.huellaResumen }, actor);
+    Object.assign(process.env, { PAGOS_ONLINE_HABILITADOS: "true", PAGOS_ENTORNO: "prueba",
+      MP_USUARIO_PRUEBA_ID: "123", MP_APLICACION_PRUEBA_ID: "456", MP_ACCESS_TOKEN_PRUEBA: "ficticia",
+      MP_URL_RETORNO: "https://tesis.example.invalid/cuenta", RESEND_API_KEY: "re_ficticia" });
+    let remota;
+    const llamadasNoPago = [];
+    globalThis.fetch = async (url, opciones) => {
+      if (new URL(url).hostname !== "api.mercadopago.com") {
+        llamadasNoPago.push(url);
+        return Response.json({ id: "externa-ficticia" });
+      }
+      if (url.endsWith("/users/me")) return Response.json({ id: 123, tags: ["test_user"] });
+      if (opciones.method === "POST") {
+        const cuerpo = JSON.parse(opciones.body);
+        remota = { id: `ORDTST${randomUUID().replaceAll("-", "")}`, user_id: "123", currency: "ARS",
+          country_code: "ARG", integration_data: { application_id: "456" },
+          external_reference: cuerpo.external_reference, total_amount: cuerpo.total_amount,
+          total_paid_amount: "0.00", status: "created", status_detail: "created",
+          created_date: new Date().toISOString(),
+          checkout_url: "https://www.mercadopago.com.ar/checkout/v1/redirect" };
+        return Response.json(remota);
+      }
+      return Response.json(remota);
+    };
+    await e.carrito(e.usuarios[0], [2]);
+    const entrega = { tipoEntrega: "envio", datosEnvio: { ciudad: "Córdoba Capital",
+      direccion: "Calle ficticia 123", codPostal: "X5000ABC", telefono: "3511234567",
+      email: "tesis@example.invalid" } };
+    const resumen = await resumenCheckout(actor, entrega);
+    const { orden } = await confirmarCheckout(actor, { ...entrega, huellaResumen: resumen.huellaResumen,
+      claveConfirmacion: randomUUID(), aceptaPrecioVigente: true });
+    assert.equal(orden.total.toFixed(2), "55000.02");
+    const inicio = await iniciarPago(actor, orden.id);
+    remota.status = "processed"; remota.status_detail = "accredited";
+    remota.total_paid_amount = "55000.02";
+    await conciliarIntento(inicio.intentoId);
+    const asignacionesPagadas = await db.asignacionPartida.findMany({
+      where: { detalleOrden: { ordenId: orden.id } }, select: { id: true, estado: true, importeEfectivo: true },
+    });
+    assert.equal(asignacionesPagadas.length, 1);
+    assert.equal(asignacionesPagadas[0].estado, "vendida");
+    assert.equal(asignacionesPagadas[0].importeEfectivo.toFixed(2), "40000.02");
+    await conciliarIntento(inicio.intentoId);
+    assert.equal(await db.asignacionPartida.count({ where: { detalleOrden: { ordenId: orden.id }, estado: "vendida" } }), 1);
+    assert.equal(await db.eventoOrden.count({ where: { ordenId: orden.id, origen: "proveedor" } }), 1);
+    assert.equal((await cambiarEstadoAdmin(orden.id, actor, "en_preparacion")).status, 200);
+    assert.equal((await cambiarEstadoAdmin(orden.id, actor, "enviada")).status, 409);
+    await revisarDomicilio(orden.id, actor);
+    const salidaSimulada = await cambiarEstadoAdmin(orden.id, actor, "enviada", true);
+    assert.equal(salidaSimulada.status, 200);
+    assert.equal(salidaSimulada.orden.esDemostracion, true);
+    assert.equal(salidaSimulada.orden.envioCoordinado, false);
+    assert.equal(salidaSimulada.orden.envioCoordinadoEn, null);
+    const detalle = await db.detalleOrden.findFirstOrThrow({ where: { ordenId: orden.id } });
+    const aceptada = await aceptarDevolucionCliente(orden.id, {
+      lineas: [{ detalleOrdenId: detalle.id, cantidad: 1 }],
+      motivo: "Devolución parcial de tesis", claveOperacion: randomUUID(),
+    }, actor);
+    const devolucion = aceptada.devoluciones[0];
+    assert.equal(devolucion.importeDebido.toFixed(2), "20000.01");
+    await assert.rejects(decidirReintegroEnvio(orden.id, actor, "x"), (error) => error.codigo === "MOTIVO_INVALIDO");
+    await decidirReintegroEnvio(orden.id, actor, "Envío simulado reintegrado tras salida");
+    await decidirReintegroEnvio(orden.id, actor, "Envío simulado reintegrado tras salida");
+    let admin = await obtenerOrdenAdmin(orden.id);
+    assert.equal(admin.saldoMonetarioPendiente, "35000.01");
+    assert.equal(admin.reintegrosPago.length, 1);
+    const pago = { importeEfectivo: "20000.01", claveOperacion: randomUUID(),
+      referenciaExterna: `SIM-producto-${randomUUID()}`, constanciaExaminada: true };
+    await registrarReintegro(orden.id, devolucion.id, pago, actor);
+    await registrarReintegro(orden.id, devolucion.id, pago, actor);
+    await iniciarReintegroSimulado(orden.id, admin.reintegrosPago[0].id, actor);
+    const constanciaEnvio = (await db.reintegroPago.findUniqueOrThrow({
+      where: { id: admin.reintegrosPago[0].id } })).referenciaExterna;
+    await completarReintegroSimulado(orden.id, admin.reintegrosPago[0].id, actor, constanciaEnvio);
+    await completarReintegroSimulado(orden.id, admin.reintegrosPago[0].id, actor, constanciaEnvio);
+    admin = await obtenerOrdenAdmin(orden.id);
+    assert.equal(admin.saldoMonetarioPendiente, "0.00");
+    assert.equal(await db.pagoReintegro.count({ where: { devolucionId: devolucion.id } }), 1);
+    assert.equal((await db.reintegroPago.findUnique({ where: { id: admin.reintegrosPago[0].id } })).importeReintegrado.toFixed(2), "15000.00");
+    assert.deepEqual(llamadasNoPago, []);
+  } finally {
+    globalThis.fetch = transporte;
+    for (const clave of Object.keys(process.env)) if (!(clave in entorno)) delete process.env[clave];
+    Object.assign(process.env, entorno);
+  }
 });
 
 test("dos devoluciones unitarias reparten exactamente un subtotal descontado de 333.33", {

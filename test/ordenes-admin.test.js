@@ -107,6 +107,28 @@ test("envío exige constancia y no admite saltos; la transición repetida no con
   } finally { await escenario.limpiar(); }
 });
 
+test("orden manual heredada conserva envío sin cotizar y no entra al flujo nuevo", async () => {
+  const escenario = await crearEscenario();
+  try {
+    const orden = await crearOrden(escenario, "envio");
+    await escenario.prisma.orden.update({ where: { id: orden.id }, data: {
+      creadaEn: null, venceEn: null,
+    } });
+    const actor = escenario.usuarios[0].id;
+    const anterior = await obtenerOrdenAdmin(orden.id);
+    assert.equal(anterior.esHeredada, true);
+    assert.equal(anterior.estadoCostoEnvio, null);
+    assert.equal(anterior.totalFinal, null);
+    assert.equal(anterior.envioCoordinado, false);
+    assert.equal((await confirmarPagoAdmin(orden.id, actor)).status, 409);
+    assert.equal((await cambiarEstadoAdmin(orden.id, actor, "en_preparacion")).status, 409);
+    const posterior = await obtenerOrdenAdmin(orden.id);
+    assert.equal(posterior.estado, anterior.estado);
+    assert.equal(posterior.totalFinal, null);
+    assert.equal(posterior.envioCoordinado, false);
+  } finally { await escenario.limpiar(); }
+});
+
 test("cancelar una pagada antes del consumo libera o consume según decisión expresa", async () => {
   for (const restituir of [true, false]) {
     const escenario = await crearEscenario();
