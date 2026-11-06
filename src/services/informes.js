@@ -331,20 +331,25 @@ export async function informeComprasVentas(filtros) {
     datos: eventos.slice((pagina - 1) * limite, pagina * limite) };
 }
 
+/** Vigencias de precio publicadas que se superponen con el período (días de Buenos Aires). */
+export async function vigenciasEnPeriodo(productoId, desde, hasta) {
+  const { inicio, fin } = limites(desde, hasta);
+  const precios = await prisma.vigenciaPrecio.findMany({ where: { productoId,
+    inicio: { lt: fin }, OR: [{ fin: null }, { fin: { gt: inicio } }],
+  }, orderBy: [{ inicio: "asc" }, { id: "asc" }] });
+  return precios.map((precio) => ({ clase: precio.clase, importe: precio.importe.toString(),
+    inicio: precio.inicio.toISOString(), fin: precio.fin?.toISOString() ?? null, origen: precio.origen }));
+}
+
 export async function historialProducto(productoId, filtros) {
   const producto = await prisma.producto.findUnique({ where: { id: productoId },
     include: { talles: { select: { id: true, stock: true } } } });
   if (!producto) throw new ErrorInforme(404, "PRODUCTO_NO_ENCONTRADO", "Producto no encontrado");
   const [informe, precios] = await Promise.all([
     informeComprasVentas({ ...filtros, productoId }),
-    prisma.vigenciaPrecio.findMany({ where: { productoId,
-      inicio: { lt: limites(filtros.desde, filtros.hasta).fin },
-      OR: [{ fin: null }, { fin: { gt: limites(filtros.desde, filtros.hasta).inicio } }],
-    }, orderBy: [{ inicio: "asc" }, { id: "asc" }] }),
+    vigenciasEnPeriodo(productoId, filtros.desde, filtros.hasta),
   ]);
   return { ...informe, producto: { id: producto.id, nombre: producto.nombre,
     stockFisicoActual: producto.talles.reduce((total, variante) => total + variante.stock, 0) },
-  precios: precios.map((precio) => ({ clase: precio.clase, importe: precio.importe.toString(),
-    inicio: precio.inicio.toISOString(), fin: precio.fin?.toISOString() ?? null, origen: precio.origen })),
-  promocionEnPeriodo: precios.some((precio) => precio.clase === "promocional") };
+  precios, promocionEnPeriodo: precios.some((precio) => precio.clase === "promocional") };
 }

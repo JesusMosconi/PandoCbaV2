@@ -27,6 +27,7 @@ import adminDropsRoutes from "./routes/admin-drops.routes.js";
 import dropsRoutes from "./routes/drops.routes.js";
 import vendedorRoutes from "./routes/vendedor.routes.js";
 import adminVentasRoutes from "./routes/admin-ventas.routes.js";
+import adminEstadisticasRoutes from "./routes/admin-estadisticas.routes.js";
 import { iniciarActivacionDrops } from "./jobs/activar-drops.js";
 
 const app = express();
@@ -63,6 +64,7 @@ app.use("/api", adminDropsRoutes);
 app.use("/api", dropsRoutes);
 app.use("/api", vendedorRoutes);
 app.use("/api", adminVentasRoutes);
+app.use("/api", adminEstadisticasRoutes);
 
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError || error?.message?.includes("no permitido")) {
